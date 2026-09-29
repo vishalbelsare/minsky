@@ -1,69 +1,29 @@
 #! /bin/sh
 
 here=`pwd`
-if test $? -ne 0; then exit 2; fi
-tmp=/tmp/$$
-mkdir $tmp
-if test $? -ne 0; then exit 2; fi
-cd $tmp
-if test $? -ne 0; then exit 2; fi
+. $here/test/common-test.sh
 
-fail()
-{
-    echo "FAILED" 1>&2
-    cd $here
-    chmod -R u+w $tmp
-    rm -rf $tmp
-    exit 1
-}
+cat >input.py <<EOF
+from pyminsky import minsky
+minsky.load('$here/test/findDefinition.mky')
 
-pass()
-{
-    echo "PASSED" 1>&2
-    cd $here
-    chmod -R u+w $tmp
-    rm -rf $tmp
-    exit 0
-}
-
-trap "fail" 1 2 3 15
-
-cat >input.tcl <<EOF
-source $here/test/assert.tcl
-minsky.load $here/test/findDefinition.mky
-set msgBox 0
-
-for {set i 0} {\$i<[minsky.model.items.size]} {incr i} {
-  minsky.model.items.@elem \$i
-  set item minsky.model.items(\$i)
-  if {[\$item.visible] && ([regexp "Variable:" [\$item.classType]]||[\$item.classType]=="VarConstant")} {
-    minsky.canvas.getItemAt [\$item.x] [\$item.y]
-    set searchItem [minsky.TCLItem]
-    set findResult [minsky.canvas.findVariableDefinition]
-    set foundItem [minsky.TCLItem]
-    switch [\$item.name] {
-       "undef" {assert "\$findResult==0" undef}
-       "param1" -
-       "3" {assert "\"\$searchItem\"==\"\$foundItem\"" paramConst}
-       "foo" {
-          assert "[\$foundItem.inputWired]"
-          assert "[\$item.x]==[\$foundItem.x]" "var coordx fail"
-          assert "[\$item.y]==[\$foundItem.y]" "var coordy fail"
-       }
-       "int" {
-          assert "\"[\$foundItem.classType]\"==\"IntOp\"" "IntOp"
-       }
-       "bar" {
-          assert "\$findResult"
-          assert "\"[\$foundItem.classType]\"==\"GodleyIcon\"" "GodleyIcon"
-       }
-     }
-  }
-}
-tcl_exit
+for i in range(len(minsky.model.items)):
+  item=minsky.model.items[i]
+  if item.visible() and  item.classType().startswith("Variable:") or item.classType().startswith("VarConstant"):
+    minsky.canvas.getItemAt(item.x(), item.y())
+    findResult=minsky.canvas.findVariableDefinition()
+    foundItem=minsky.canvas.itemIndicator
+    if item.name()=="undef": assert not findResult,"undef" 
+    if item.name() in ["param1","3"]: assert item.id()==foundItem.id(), "paramConst" 
+    if item.name()=="foo":
+      assert item.id()==foundItem.id()
+    if item.name()=="int": assert foundItem.classType()=="IntOp", "IntOp"
+    if item.name()=="bar": 
+      assert findResult
+      assert foundItem.classType()=="GodleyIcon", "GodleyIcon"
 EOF
 
-$here/gui-tk/minsky input.tcl
+python3 input.py
 if [ $? -ne 0 ]; then fail; fi
 
 pass

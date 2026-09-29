@@ -22,8 +22,6 @@
 #include <set>
 #include <vector>
 
-#include <ecolab.h>
-
 #include "variable.h"
 #include "assetClass.h"
 
@@ -39,7 +37,6 @@ namespace minsky
     friend struct SchemaHelper;
     friend class GodleyIcon;
     typedef std::vector<std::vector<string>> Data;
-    enum DisplayStyle {DRCR, sign}; ///< how to display -ve data in table
   private:
     CLASSDESC_ACCESS(GodleyTable);
     /// class of each column (used in DE compliant mode)
@@ -54,7 +51,8 @@ namespace minsky
       m_assetClass.resize(cols, noAssetClass);
     }
   public:
-
+    typedef GodleyAssetClass::AssetClass AssetClass;
+    
     bool doubleEntryCompliant;
 
     std::string title;
@@ -67,13 +65,6 @@ namespace minsky
       
     }
     
-    GodleyTable(const GodleyTable& other)
-      : m_assetClass(other.m_assetClass),
-        data(other.data),
-        doubleEntryCompliant(other.doubleEntryCompliant),
-        title(other.title)
-    { }
-  
     // Perform deep comparison of Godley tables in history to avoid spurious noAssetClass columns from arising during undo. For ticket 1118.
     bool operator==(const GodleyTable& other) const 
     {
@@ -82,9 +73,9 @@ namespace minsky
     }    
 
     /// class of each column (used in DE compliant mode)
-    const vector<AssetClass>& _assetClass() const {return m_assetClass;}
-    AssetClass _assetClass(std::size_t col) const;
-    AssetClass _assetClass(std::size_t col, AssetClass cls);
+    const vector<AssetClass>& assetClass() const {return m_assetClass;}
+    AssetClass assetClass(std::size_t col) const;
+    AssetClass assetClass(std::size_t col, AssetClass cls);
     
     /// Check whether more than one equity column is present
     /// irrespective of single or multiple equity column mode.
@@ -101,16 +92,8 @@ namespace minsky
     bool signConventionReversed(int col) const
     {
       return doubleEntryCompliant && 
-        (_assetClass(col)==liability || _assetClass(col)==equity);
+        (assetClass(col)==liability || assetClass(col)==equity);
     }
-    /**
-       TCL accessor method 
-       @param col - column number
-       @param [opt] assetClass (symbolic name).
-       @return current asset class value for column \a col
-       sets if assetClass present, otherwise gets
-    */
-    string assetClass(ecolab::TCL_args args); 
   
     /// returns true if \a row is an "Initial Conditions" row
     bool initialConditionRow(unsigned row) const;
@@ -167,7 +150,13 @@ namespace minsky
       else
         return "";
     }
+    void setCell(unsigned row, unsigned col, const string& data) {
+      cell(row,col)=data;
+    }
 
+    /// insert A-L into the equity column \a c, such that A-L-E=0
+    void balanceEquity(int col);
+    
     /// get the set of column labels, in column order
     std::vector<std::string> getColumnVariables() const;
     /// get the vector of unique variable names from the interior of the
@@ -183,14 +172,17 @@ namespace minsky
     /// toggle flow signs according to double entry compliant mode
     void setDEmode(bool doubleEntryCompliant);
 
+    std::map<std::string,double> rowSumAsMap(int row) const;
+    static std::string stringify(const std::map<std::string,double>&);
+    
     /// return the symbolic sum across a row
-    string rowSum(int row) const;
+    std::string rowSum(int row) const {return stringify(rowSumAsMap(row));}
 
     /// accessor for schema access
     const Data& getData() const {return data;}
 
-    void exportToLaTeX(const char* filename) const;
-    void exportToCSV(const char* filename) const;
+    void exportToLaTeX(const std::string& filename) const;
+    void exportToCSV(const std::string& filename) const;
 
     /// reorders columns into assets/liabilities and equities. Adds empty columns if an asset class is not present.
     void orderAssetClasses();

@@ -1,0 +1,139 @@
+
+<!--Converted with LaTeX2HTML 2025 (Released January 1, 2025) -->
+<HTML lang="en">
+<HEAD>
+<TITLE>Attaching Variables to Ravels</TITLE>
+
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-15">
+<META NAME="viewport" CONTENT="width=device-width, initial-scale=1.0">
+<META NAME="Generator" CONTENT="LaTeX2HTML v2025">
+
+<LINK REL="STYLESHEET" HREF="Ravel.css">
+
+<LINK REL="next" HREF="node38.html">
+<LINK REL="previous" HREF="node36.html">
+<LINK REL="next" HREF="node38.html">
+</HEAD>
+
+<BODY  bgcolor="#ffffff">
+<!--Navigation Panel-->
+<A
+ HREF="node38.html">
+<IMG WIDTH="37" HEIGHT="24" ALT="next" SRC="next.png"></A> 
+<A
+ HREF="node35.html">
+<IMG WIDTH="26" HEIGHT="24" ALT="up" SRC="up.png"></A> 
+<A
+ HREF="node36.html">
+<IMG WIDTH="63" HEIGHT="24" ALT="previous" SRC="prev.png"></A> 
+<A ID="tex2html427"
+  HREF="Ravel.html">
+<IMG WIDTH="65" HEIGHT="24" ALT="contents" SRC="contents.png"></A>  
+<BR>
+<B> Next:</B> <A
+ HREF="node38.html">Basic Analysis using Ravel</A>
+<B> Up:</B> <A
+ HREF="node35.html">An Overview of Ravel</A>
+<B> Previous:</B> <A
+ HREF="node36.html">Slicing, Dicing and Rotating</A>
+ &nbsp; <B>  <A ID="tex2html428"
+  HREF="Ravel.html">Contents</A></B> 
+<BR>
+<BR>
+<!--End of Navigation Panel-->
+
+<H1><A ID="SECTION00320000000000000000">
+Attaching Variables to Ravels</A>
+</H1>
+
+<P>
+The source data file combines information on House Price Indices (where
+the base year is 2010, so all indices are 100 during 2010), and the
+annual rate of change of house prices, with data on both Nominal and
+Real (CPI-deflated) prices. To analyse the data, it is useful to separate
+it into House Price Index information and House Price Inflation information,
+and to focus on Real rather than Nominal Prices. That is done by attaching
+the output of the Ravel to Locks, and the Locks to named Variables
+that you create.
+
+<P>
+The next image shows two variables <IMG
+ STYLE="height: 2.03ex; vertical-align: -0.46ex; " SRC="img73.png"
+ ALT="$HPI_{Real}$% WIDTH=124 HEIGHT=29 "> and <IMG
+ STYLE="height: 1.68ex; vertical-align: -0.12ex; " SRC="img74.png"
+ ALT="$\Delta{HPI}$% WIDTH=100 HEIGHT=24 ">.
+The lock for <IMG
+ STYLE="height: 1.68ex; vertical-align: -0.12ex; " SRC="img74.png"
+ ALT="$\Delta{HPI}$% WIDTH=100 HEIGHT=24 "> has been closed, while the lock for <IMG
+ STYLE="height: 2.03ex; vertical-align: -0.46ex; " SRC="img73.png"
+ ALT="$HPI_{Real}$% WIDTH=124 HEIGHT=29 ">
+is still open. Once the lock is closed, the output from that lock
+remains the same, even if the selection on the source Ravel is altered.
+
+<P>
+<IMG
+  STYLE="" SRC="./tut05HPIandInflationSeparatedLocks.png"
+ ALT="Image tut05HPIandInflationSeparatedLocks%  WIDTH=1814 HEIGHT=852 ">
+
+<P>
+With the data separated into index and inflation data, we can now
+focus on those subsets of the data rather than the entire source file.
+The next image shows the source Ravel in icon mode, with the house
+price inflation data attached to another Ravel and the currently selected
+data displayed in a sheet.
+
+<P>
+<IMG
+  STYLE="height: 37.28ex; vertical-align: -0.12ex; " SRC="img77.png"
+ ALT="\includegraphics[width=\textwidth]{images/tut06HPIwithVariablesAssigned02DeltaHPI}% WIDTH=527 HEIGHT=256 ">
+
+<P>
+The information in the sheet suggests a possibly useful piece of analysis:
+why not compare the average for all advanced countries (the first
+entry on the Reference Area axis) to each advanced country?
+
+<P>
+The image below shows the result of attempting to do this by selecting
+just the data for ``Advanced Economies'' using the selector dot, and
+attaching that to a new variable <IMG
+ STYLE="height: 3.08ex; vertical-align: -0.82ex; " SRC="img75.png"
+ ALT="$\Delta{HPI}_{Advanced}^{Avg}$% WIDTH=217 HEIGHT=44 ">,
+while also selecting a number of advanced economies from the axis
+(Australia, Austria, Belgium, etc.) and assigning that to another
+variable <IMG
+ STYLE="height: 2.10ex; vertical-align: -0.46ex; " SRC="img76.png"
+ ALT="$\Delta{HPI}_{Advanced}$% WIDTH=217 HEIGHT=30 ">.
+
+<P>
+<IMG
+  STYLE="" SRC="./tut07SeparatingAdvancedAverage.png"
+ ALT="Image tut07SeparatingAdvancedAverage%  WIDTH=2322 HEIGHT=1180 ">
+
+<P>
+<HR>
+<!--Navigation Panel-->
+<A
+ HREF="node38.html">
+<IMG WIDTH="37" HEIGHT="24" ALT="next" SRC="next.png"></A> 
+<A
+ HREF="node35.html">
+<IMG WIDTH="26" HEIGHT="24" ALT="up" SRC="up.png"></A> 
+<A
+ HREF="node36.html">
+<IMG WIDTH="63" HEIGHT="24" ALT="previous" SRC="prev.png"></A> 
+<A ID="tex2html427"
+  HREF="Ravel.html">
+<IMG WIDTH="65" HEIGHT="24" ALT="contents" SRC="contents.png"></A>  
+<BR>
+<B> Next:</B> <A
+ HREF="node38.html">Basic Analysis using Ravel</A>
+<B> Up:</B> <A
+ HREF="node35.html">An Overview of Ravel</A>
+<B> Previous:</B> <A
+ HREF="node36.html">Slicing, Dicing and Rotating</A>
+ &nbsp; <B>  <A ID="tex2html428"
+  HREF="Ravel.html">Contents</A></B> 
+<!--End of Navigation Panel-->
+
+</BODY>
+</HTML>

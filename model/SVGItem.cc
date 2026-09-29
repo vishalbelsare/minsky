@@ -37,6 +37,8 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "SVGItem.h"
+#include "SVGItem.rcd"
+#include "cairo_base.h"
 #include "minsky_epilogue.h"
 #include <librsvg-2.0/librsvg/rsvg.h>
 
@@ -54,7 +56,7 @@ namespace minsky
  
   void SVGRenderer::setResource(const std::string& resource)
   {
-    if (svg) /*rsvg_handle_free*/ g_object_unref(svg);
+    if (svg) g_object_unref(svg);
     GError* err=nullptr;
     svg=rsvg_handle_new_from_file(resource.c_str(),&err);
     if (err)
@@ -64,23 +66,37 @@ namespace minsky
         g_error_free(err);
         throw runtime_error(msg);
       }
+#ifdef MXE // MXE doesn't currently have a Rust compiler, so librsvg can be no later than 2.40.21
     RsvgDimensionData dims;
     rsvg_handle_get_dimensions(svg, &dims);
     m_width=dims.width;
     m_height=dims.height;
+#endif
   }
   
 
   SVGRenderer::~SVGRenderer()
   {
     if (svg)
-      /*rsvg_handle_free*/ g_object_unref(svg);
+      g_object_unref(svg);
   }
 
-  void SVGRenderer::render(cairo_t* cairo)
+  void SVGRenderer::render(cairo_t* cairo, double width, double height) const
   {
     if (svg)
+#ifdef MXE // MXE doesn't currently have a Rust compiler, so librsvg can be no later than 2.40.21
+      cairo_scale(cairo,width/m_width, height/m_height);
       rsvg_handle_render_cairo(svg,cairo);
+#else
+      {
+        GError* err=nullptr;
+        const RsvgRectangle rect{0,0,width,height};
+        rsvg_handle_render_document(svg,cairo,&rect,&err);
+      }
+#endif
   }
 
 }
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::SVGRenderer);
+
+

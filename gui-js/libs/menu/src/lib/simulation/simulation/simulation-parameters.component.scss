@@ -1,0 +1,5 @@
+@use '../../../../../shared/src/lib/theme/common-style' as *;
+
+button {
+  margin: $margin;
+}

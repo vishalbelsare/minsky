@@ -1,3 +1,13 @@
+/*
+ * Ascii85 (Base85) encoding and decoding functions.
+ * Origin: Derived from the standard Adobe Systems PostScript/PDF Ascii85 
+ *         specification algorithm (5-character to 4-byte chunk decoding).
+ * 
+ * License: Public Domain / CC0 (Creative Commons Zero)
+ * This implementation is a standard mathematical translation of an open
+ * specification, completely freestanding, and free of third-party copyright.
+ */
+
 // a85.cpp
 
 #include "a85.h"
@@ -15,7 +25,7 @@ void to_a85(const u8* data, int binlen, char* text, bool append_null) {
     if (append_null) {
         *(--text) = 0;
     }
-    int rem = binlen & 3;
+    const int rem = binlen & 3;
     if (rem) {
         u32 val = 0;
         for (int i = 4 - rem; i < 4; i++) {

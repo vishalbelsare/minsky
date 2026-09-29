@@ -21,11 +21,11 @@
 
 #include "schema/assetClass.h"
 #include "classdesc_access.h"
-#include "variableValue.h"
+#include "constMap.h"
+#include "variableValues.h"
 #include "str.h"
 #include "flowCoef.h"
 
-#include <ecolab.h>
 #include <arrays.h>
 
 namespace minsky
@@ -50,11 +50,11 @@ namespace minsky
     (const GodleyIterator& begin, const GodleyIterator& end, 
      const VariableValues& values);
 
-    /// evaluate Godley tables on sv and current value of fv, storing
+    /// evaluate Godley tables on sv (of type double[]) and current value of fv (of type double[]), storing
     /// result in output variable (of \a fv). \a sv is assume to be of
     /// size \c stockVars and \a fv is assumed to be of size \c
     /// flowVars.
-    void eval(double sv[], const double fv[]) const;
+    void eval(double* sv, const double* fv) const;
 
     EvalGodley():  compatibility(false) {}
     /// if compatibility is true, then consttrainst between Godley
@@ -77,7 +77,7 @@ namespace minsky
 
     /// Godley table data this points to
     const std::vector<std::vector<std::string> >& data() const;
-    const GodleyAssetClass::AssetClass assetClass(std::size_t col) const;
+    GodleyAssetClass::AssetClass assetClass(std::size_t col) const;
     bool signConventionReversed(int col) const;
     bool initialConditionRow(int row) const;
     /// returns valueid for variable reference in table
@@ -91,7 +91,8 @@ namespace minsky
   /// for checking shared columns between tables
   struct SharedColumnCheck: public GodleyAssetClass
   {
-
+    typedef GodleyAssetClass::AssetClass AssetClass;
+    
     /// asset type of previously seen column of this name
     std::map<string, AssetClass> colAssetType;
     /// indicates a column is shared between Godley tables

@@ -19,11 +19,12 @@
 #ifndef PLOTWIDGET_H
 #define PLOTWIDGET_H
 #include <cairo_base.h>
-#include <cairoSurfaceImage.h>
-#include <TCL_obj_base.h>
+#include "renderNativeWindow.h"
 #include "classdesc_access.h"
+#include "latexMarkup.h"
 #include "plot.h"
 #include "variable.h"
+#include "variableValue.h"
 #include "zoom.h"
 
 #include <boost/date_time/posix_time/posix_time_types.hpp>
@@ -38,7 +39,7 @@ namespace minsky
   using namespace ecolab;
 
   struct PlotWidgetSuper: public ItemT<PlotWidget>,
-                          public ecolab::Plot, public ecolab::CairoSurface {};
+                          public ecolab::Plot, public RenderNativeWindow {};
 
   /// a container item for a plot widget
   class PlotWidget: public PlotWidgetSuper
@@ -60,32 +61,73 @@ namespace minsky
     friend struct PlotItem;
 
     bool xIsSecsSinceEpoch=false;
+    bool redraw(int, int, int, int) override;
+    using Plot::redraw;
+
+    // shadow labels, so we can interpret as LaTeX code rather than Pango markup
+    std::string m_xlabel, m_ylabel, m_y1label;
+
+    /// extra offset for titles
+    mutable double yoffs=0;
+
+    Formatter formatter=defaultFormatter;
+    size_t m_numLines=1; ///< number of ports on the side
+
+    /// returns to starting pen number for input \a port
+    size_t startPen(size_t port) const;
+
+    bool clearPensOnLabelling=false;
+    
+    void draw(cairo_t* cairoShim) const;
   public:
     using Item::x;
     using Item::y;
-    using ecolab::CairoSurface::surface;
+    using RenderNativeWindow::surface;
+    using RenderNativeWindow::requestRedraw;
+    using RenderNativeWindow::renderToSVG;
+
+    /// number of bounds (xmin/xmax, ymin/ymax, y1min/y1max) ports
+    static constexpr unsigned nBoundsPorts=6;
 
     /// variable port attached to (if any)
-    std::vector<std::shared_ptr<VariableValue>> yvars;
+    std::vector<std::vector<std::shared_ptr<VariableValue>>> yvars;
     std::vector<std::shared_ptr<VariableValue>> xvars;
 
+    // cache penLabels to label pen styles dialog
+    std::vector<std::string> penLabels;
+    void labelPen(size_t pen, const std::string& label) {
+      if (clearPensOnLabelling) {penLabels.clear(); clearPensOnLabelling=false;}
+      if (penLabels.size()<=pen+1) penLabels.resize(pen+1);
+      penLabels[pen]=label;
+      Plot::labelPen(pen,latexToPango(label));
+    }
+
     /// variable ports specifying plot size
-    VariableValue xminVar, xmaxVar, yminVar, ymaxVar, y1minVar, y1maxVar;
+    std::shared_ptr<VariableValue> xminVar, xmaxVar, yminVar, ymaxVar, y1minVar, y1maxVar;
+    /// Settable bounds values if above variables not connected
+    /// NaN means autocalculate from data
+    double xmin=nan(""), xmax=xmin, ymin=xmin, ymax=xmin, y1min=xmin, y1max=xmin;
     /// number of ticks to show in canvas item
     unsigned displayNTicks{3};
     double displayFontSize{3};
-
+    /// markers at a position given by a named variable/parameter 
+    std::vector<std::string> horizontalMarkers;
+    std::vector<std::string> verticalMarkers;
 
     std::string title;
 
     /// automatic means choose line or bar depending on the x-vector type.
-    enum PlotType {line, bar, automatic};
     PlotType plotType=automatic;
     
     PlotWidget();
     void addPorts();
     PlotWidget(const PlotWidget& x): PlotWidgetSuper(x) {addPorts();}
     PlotWidget(PlotWidget&& x): PlotWidgetSuper(x) {addPorts();}
+
+    /// @{ number of input ports along a side
+    size_t numLines() const {return m_numLines;}
+    size_t numLines(size_t n);
+    /// @}
     
     // pick the Item width method, not ecolab::Plot's
     float width() const {return Item::width();}
@@ -93,6 +135,29 @@ namespace minsky
     
     const PlotWidget* plotWidgetCast() const override {return this;}
     PlotWidget* plotWidgetCast() override {return this;}          
+
+    /// shadowed label commands to allow latex intepretation
+    std::string const& xlabel() const {return m_xlabel;}
+    std::string const& xlabel(const std::string& x) {
+      ecolab::Plot::xlabel=latexToPangoNonItalicised(x);
+      return m_xlabel=x;
+    }
+    std::string const& ylabel() const {return m_ylabel;}
+    std::string const& ylabel(const std::string& x) {
+      ecolab::Plot::ylabel=latexToPangoNonItalicised(x);
+      return m_ylabel=x;
+    }
+    std::string const& y1label() const {return m_y1label;}
+    std::string const& y1label(const std::string& x) {
+      ecolab::Plot::y1label=latexToPangoNonItalicised(x);
+      return m_y1label=x;
+    }
+
+    /// @{ bar chart bar width control
+    // for now, set all bar width to the same value
+    double barWidth() const;
+    double barWidth(double w);
+    /// @}
     
     void addPlotPt(double t); ///< add another plot point
     void updateIcon(double t) override {addPlotPt(t);}
@@ -102,36 +167,49 @@ namespace minsky
     void connectVar(const std::shared_ptr<VariableValue>& var, unsigned port);
     void disconnectAllVars();
     using ecolab::Plot::draw;
-    void draw(cairo_t* cairo) const override;
+    void draw(const ICairoShim& cairoShim) const override;
     void requestRedraw(); ///< redraw plot using current data to all open windows
-    bool redraw(int x0, int y0, int width, int height) override
-    {if (surface.get()) {Plot::draw(surface->cairo(),width,height); surface->blit();} return surface.get();}
     void redrawWithBounds() override {redraw(0,0,500,500);}    
-    
-    bool plotTabDisplay=true; // ensure plots persisted on plot tab, but can optionally be made hidden. for ticket 1298
-    void togglePlotTabDisplay() {plotTabDisplay=!plotTabDisplay;}     
-    bool plotOnTab() const {return plotTabDisplay;}     
     
     /// add this as a display plot to its group
     void makeDisplayPlot();
           
     void resize(const LassoBox&) override;
-    ClickType::Type clickType(float x, float y) override;
+    ClickType::Type clickType(float x, float y) const override;
+    bool contains(float x, float y) const override
+    {return clickType(x,y)!=ClickType::outside;}
 
     /// set autoscaling
-    void autoScale() {xminVar=xmaxVar=yminVar=ymaxVar=y1minVar=y1maxVar=VariableValue();}
+    void autoScale() {xminVar=xmaxVar=yminVar=ymaxVar=y1minVar=y1maxVar=nullptr;}
     /// sets the plot scale and pen labels
     void scalePlot();
 
     /// @{ handle mouse events
-    void mouseDown(double,double);
-    void mouseMove(double,double);
+    void mouseDown(float,float) override;
+    void mouseMove(float,float) override;
+    void mouseUp(float x,float y) override {
+      mouseMove(x,y);
+      ct=ClickType::outside;
+    }
+    bool onMouseOver(float,float) override;
+    void onMouseLeave() override {valueString="";}
+    /// @}
+
+    /// @{ Disambiguate EventInterface vs Item — classdesc resolves to
+    /// EventInterface's empty stubs otherwise (tickets:#1918)
+    void moveTo(float x, float y) override {Item::moveTo(x,y);}
+    std::vector<float> position() const override {return {Item::x(), Item::y()};}
     /// @}
 
     /// export the plotted data as a CSV file
     // implemented as a single argument function here for exposure to TCL
     void exportAsCSV(const string& filename) {ecolab::Plot::exportAsCSV(filename);}
 
+    void destroyFrame() override {RenderNativeWindow::destroyFrame();}
+
+    /// return list of variables that could be attached to markers
+    std::set<std::string> availableMarkers() const;
+    
   };
 
 }

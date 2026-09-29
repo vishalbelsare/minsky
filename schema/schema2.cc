@@ -54,7 +54,7 @@ namespace schema2
     
     a.hypercube(hc); //dimension data
     assert(a.size()==data.size());
-    memcpy(a.begin(),&data[0],data.size()*sizeof(data[0]));
+    memcpy(a.begin(),data.data(),data.size()*sizeof(data[0]));
   }
 
   struct Schema1Layout
@@ -63,16 +63,25 @@ namespace schema2
     Schema1Layout(const vector<shared_ptr<schema1::Layout>>& x) {
       for (auto& i: x)
         {
-          // serialise to json, then deserialise to a UnionLayout
-          json_pack_t jbuf;
-          i->json_pack(jbuf,"");
-          json_unpack(jbuf,"",layout[i->id]);
+          if (auto ul=dynamic_cast<schema1::UnionLayout*>(i.get()))
+            layout[i->id]=*ul;
+          else
+            {
+              // TODO: I don't think this code will ever be executed?
+              // serialise to XML, then deserialise to a UnionLayout
+              ostringstream is;
+              xml_pack_t xmlPackBuf(is);
+              i->xml_pack(xmlPackBuf,"");
+              istringstream os(is.str());
+              xml_unpack_t xmlUnpackBuf(os);
+              xml_unpack(xmlUnpackBuf,"",layout[i->id]);
+            }
         }
     }
     template <class V, class O>
     void addItem(V& vec, const O& item) {
       vec.emplace_back(item);
-      if (layout.count(item.id))
+      if (layout.contains(item.id))
         vec.back().addLayout(layout[item.id]);
     }
   };
@@ -149,7 +158,6 @@ namespace schema2
       {
         layout.addItem(items,i);
         // override any height specifcation with a legacy iconScale parameter
-        items.back().height.reset();
         items.back().iconScale=i.zoomFactor/m.zoomFactor;
       }
     for (auto& i: m.model.groups)

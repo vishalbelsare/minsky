@@ -16,17 +16,18 @@
   You should have received a copy of the GNU General Public License
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
+#include "minsky.h"
 #include "geometry.h"
-#define OPNAMEDEF
 #include "operation.h"
+#include "dataOp.h"
 #include "userFunction.h"
 #include "ravelWrap.h"
-#include "minsky.h"
 #include "str.h"
 #include "cairoItems.h"
 
 #include <cairo_base.h>
 #include <pango.h>
+#include "../engine/cairoShimCairo.h"
 #include "minsky_epilogue.h"
 
 #include <math.h>
@@ -39,126 +40,56 @@
 using namespace ecolab;
 using ecolab::cairo::CairoSave;
 
-namespace
-{
-  struct DrawBinOp
-  {
-    cairo_t *cairo;
-    DrawBinOp(cairo_t *cairo): cairo(cairo) {}
-
-    void drawPlus() const
-    {
-      cairo_move_to(cairo,0,-5);
-      cairo_line_to(cairo,0,5);
-      cairo_move_to(cairo,-5,0);
-      cairo_line_to(cairo,5,0);
-      cairo_stroke(cairo);
-    }
-
-    void drawMinus() const
-    {
-      cairo_move_to(cairo,-5,0);
-      cairo_line_to(cairo,5,0);
-      cairo_stroke(cairo);
-    }
-
-    void drawMultiply() const
-    {
-      cairo_move_to(cairo,-5,-5);
-      cairo_line_to(cairo,5,5);
-      cairo_move_to(cairo,-5,5);
-      cairo_line_to(cairo,5,-5);
-      cairo_stroke(cairo);
-    }
-
-    void drawDivide() const
-    {
-      cairo_move_to(cairo,-5,0);
-      cairo_line_to(cairo,5,0);
-      cairo_new_sub_path(cairo);
-      cairo_arc(cairo,0,3,1,0,2*M_PI);
-      cairo_new_sub_path(cairo);
-      cairo_arc(cairo,0,-3,1,0,2*M_PI);
-      cairo_stroke(cairo);
-    }
-
-    // puts a small symbol to identify port
-    // x, y = position of symbol
-    void drawPort(void (DrawBinOp::*symbol)() const, float x, float y, float rotation)  const
-    {
-      CairoSave cs(cairo);
-      
-      double angle=rotation * M_PI / 180.0;
-      double fm=std::fmod(rotation,360);
-      if (!((fm>-90 && fm<90) || fm>270 || fm<-270))
-        y=-y;
-      cairo_rotate(cairo, angle);
-      
-      cairo_translate(cairo,0.7*x,0.6*y);
-      cairo_scale(cairo,0.5,0.5);
-      
-      // and counter-rotate
-      cairo_rotate(cairo, -angle);
-      (this->*symbol)();
-    }
-  };
-}
-
 namespace minsky
 {
-
-  // necessary for Classdesc reflection!
-  constexpr float IntOp::intVarOffset;
-  constexpr float OperationBase::l;
-  constexpr float OperationBase::h;
-  constexpr float OperationBase::r;
-
   namespace
   {
-    struct SumInputPort: public InputPort
+    struct SumInputPort: public MultiWireInputPort
     {
-      bool multiWireAllowed() const override {return true;}
       void combineInput(double& x, double y) const override {x+=y;}
-      SumInputPort(Item& item): InputPort(item) {}    
+      SumInputPort(Item& item): MultiWireInputPort(item) {}    
     };
 
-    struct MulInputPort: public InputPort
+    struct MulInputPort: public MultiWireInputPort
     {
-      bool multiWireAllowed() const override {return true;}
       void combineInput(double& x, double y) const override {x*=y;}
-      MulInputPort(Item& item): InputPort(item) {}    
+      MulInputPort(Item& item): MultiWireInputPort(item) {}    
       double identity() const override {return 1;}
     };
 
-    struct MaxInputPort: public InputPort
+    struct MaxInputPort: public MultiWireInputPort
     {
-      bool multiWireAllowed() const override {return true;}
       void combineInput(double& x, double y) const override {if (y>x) x=y;}
-      MaxInputPort(Item& item): InputPort(item) {}
+      MaxInputPort(Item& item): MultiWireInputPort(item) {}
       double identity() const override {return -std::numeric_limits<double>::max();}
     };
 
-    struct MinInputPort: public InputPort
+    struct MinInputPort: public MultiWireInputPort
     {
-      bool multiWireAllowed() const override {return true;}
       void combineInput(double& x, double y) const override {if (y<x) x=y;}
-      MinInputPort(Item& item): InputPort(item) {}    
+      MinInputPort(Item& item): MultiWireInputPort(item) {}    
       double identity() const override {return std::numeric_limits<double>::min();}
     };
-    struct AndInputPort: public InputPort
+    struct AndInputPort: public MultiWireInputPort
     {
-      bool multiWireAllowed() const override {return true;}
       void combineInput(double& x, double y) const override {x=(x>0.5)&&(y>0.5);}
-      AndInputPort(Item& item): InputPort(item) {}    
+      AndInputPort(Item& item): MultiWireInputPort(item) {}    
       double identity() const override {return 1;}
     };
-    struct OrInputPort: public InputPort
+    struct OrInputPort: public MultiWireInputPort
     {
-      bool multiWireAllowed() const override {return true;}
       void combineInput(double& x, double y) const override {x=(x>0.5)||(y>0.5);}
-      OrInputPort(Item& item): InputPort(item) {}    
+      OrInputPort(Item& item): MultiWireInputPort(item) {}    
     };
   }
+
+  void DrawBinOpShim::drawSymbol(const char* s) const
+  {
+    cairoShim.scale(zoomFactor,zoomFactor);
+    cairoShim.moveTo(-10,-10);
+    cairoShim.showText(TextProperties("",s));
+  }
+ 
   
   bool OperationBase::multiWire() const
   {
@@ -200,6 +131,10 @@ namespace minsky
         case or_:
           m_ports.emplace_back(make_shared<OrInputPort>(*this));
           break;
+        case meld:
+        case merge:
+          m_ports.emplace_back(make_shared<MultiWireInputPort>(*this));
+          break;
         default:
           m_ports.emplace_back(make_shared<InputPort>(*this));
           break;
@@ -208,189 +143,205 @@ namespace minsky
   
   float OperationBase::scaleFactor() const
   {
-    float z=zoomFactor();
-    float l=OperationBase::l*z, r=OperationBase::r*z, 
+    const float z=zoomFactor();
+    const float l=OperationBase::l*z, r=OperationBase::r*z, 
       h=OperationBase::h*z;
     return std::max(1.0f,std::min(0.5f*iWidth()*z/std::max(l,r),0.5f*iHeight()*z/h));  
   }  
-  
-  void OperationBase::draw(cairo_t* cairo) const
+
+  void OperationBase::drawUserFunction(const ICairoShim& cairoShim) const
   {
     // if rotation is in 1st or 3rd quadrant, rotate as
     // normal, otherwise flip the text so it reads L->R
-    double angle=rotation() * M_PI / 180.0;
-    double fm=std::fmod(rotation(),360);
-    bool textFlipped=!((fm>-90 && fm<90) || fm>270 || fm<-270);
-    double coupledIntTranslation=0;
-    float z=zoomFactor();
+    const double angle=rotation() * M_PI / 180.0;
+    const bool textFlipped=flipped(rotation());
+    const float z=zoomFactor();
 
-    auto t=type();
-    // call the iconDraw method if data description is empty
-    if (t==OperationType::data && dynamic_cast<const DataOp&>(*this).description().empty())
-      t=OperationType::numOps;
-
-    switch (t)
-      {
-        // at the moment its too tricky to get all the information
-        // together for rendering constants
-      case OperationType::data:
-      case OperationType::userFunction:
-        {
-        
-          auto& c=dynamic_cast<const NamedOp&>(*this);
+    auto& c=dynamic_cast<const NamedOp&>(*this);
           
-          Pango pango(cairo);
-          pango.setFontSize(10*scaleFactor()*z);
-          pango.setMarkup(latexToPango(c.description()));
-          pango.angle=angle + (textFlipped? M_PI: 0);
-          Rotate r(rotation()+ (textFlipped? 180: 0),0,0);
+    TextProperties tp(latexToPango(c.description()));
+    tp.fontSize=10.0*scaleFactor()*z;
+    tp.angle=angle + (textFlipped? M_PI: 0);
+    const Rotate r(rotation()+ (textFlipped? 180: 0),0,0);
 
-          // parameters of icon in userspace (unscaled) coordinates
-          float w, h, hoffs;
-          w=0.5*pango.width()+2*z; 
-          h=0.5*pango.height()+4*z;        
-          hoffs=pango.top()/z;
+    // parameters of icon in userspace (unscaled) coordinates
+    float w, h, hoffs;
+    auto bbox=cairoShim.textExtents(tp);
+    w=0.5*bbox.width+2*z; 
+    h=0.5*bbox.height+4*z;        
+    hoffs=bbox.top/z;
     
-          {
-            cairo::CairoSave cs(cairo);
-            cairo_move_to(cairo,r.x(-w+1,-h-hoffs+2*z), r.y(-w+1,-h-hoffs+2*z));
-            pango.show();
-          }
+    {
+      cairoShim.save();
+      cairoShim.moveTo(r.x(-w+1,-h-hoffs+2*z), r.y(-w+1,-h-hoffs+2*z));
+      cairoShim.showText(tp);
+      cairoShim.restore();
+    }
 
-          cairo_rotate(cairo, angle);
+    cairoShim.rotate(angle);
                
-          cairo_set_source_rgb(cairo,0,0,1);
-          cairo_move_to(cairo,-w,-h);
-          cairo_line_to(cairo,-w,h);
-          cairo_line_to(cairo,w,h);
+    cairoShim.setSourceRGB(0,0,1);
+    cairoShim.moveTo(-w,-h);
+    cairoShim.lineTo(-w,h);
+    cairoShim.lineTo(w,h);
 
-          cairo_line_to(cairo,w+2*z,0);
-          cairo_line_to(cairo,w,-h);
-          cairo_close_path(cairo);
-          cairo::Path clipPath(cairo);
-          cairo_stroke(cairo);
+    cairoShim.lineTo(w+2*z,0);
+    cairoShim.lineTo(w,-h);
+    cairoShim.closePath();
+    cairoShim.save(); // Save the clip path shape
+    cairoShim.stroke();
+    cairoShim.restore();
           
-          cairo_rotate(cairo,-angle); // undo rotation
+    cairoShim.rotate(-angle); // undo rotation
 
-          // set the output ports coordinates
-          // compute port coordinates relative to the icon's
-          // point of reference
-          Rotate rr(rotation(),0,0);
+    // set the output ports coordinates
+    // compute port coordinates relative to the icon's
+    // point of reference
+    const Rotate rr(rotation(),0,0);
 
-          m_ports[0]->moveTo(x()+rr.x(w+2,0), y()+rr.y(w+2,0));
-          switch (numPorts())
-            {
-            case 1: break;
-            case 2: 
-              m_ports[1]->moveTo(x()+rr.x(-w,0), y()+rr.y(-w,0));
-              break;
-            case 3: default:
-              m_ports[1]->moveTo(x()+rr.x(-w,0), y()+rr.y(-w,-h+3));
-              m_ports[2]->moveTo(x()+rr.x(-w,0), y()+rr.y(-w,h-3));
-              break;
-            }
-          if (mouseFocus)
-            {
-              drawPorts(cairo);
-              displayTooltip(cairo,tooltip);
-              if (onResizeHandles) drawResizeHandles(cairo);             
-            }
-          clipPath.appendToCurrent(cairo);
-          cairo_clip(cairo);
-          if (selected) drawSelected(cairo);
-          return;
-        }
-      case OperationType::integrate:
+    m_ports[0]->moveTo(x()+rr.x(w+2,0), y()+rr.y(w+2,0));
+    switch (numPorts())
+      {
+      case 1: break;
+      case 2: 
+        m_ports[1]->moveTo(x()+rr.x(-w,0), y()+rr.y(-w,0));
         break;
-      default:
-        {
-          CairoSave cs(cairo);
-          cairo_scale(cairo,z,z);
-          iconDraw(cairo);
-        }
-
-        
-        CairoSave cs(cairo);
-        cairo_rotate(cairo, angle);
-        
-        float l=OperationBase::l*z, r=OperationBase::r*z, 
-          h=OperationBase::h*z;
-          
-        if (fabs(l)<0.5*iWidth()*z) l=-0.5*iWidth()*z;        
-        if (r<0.5*iWidth()*z) r=0.5*iWidth()*z;    
-        if (h<0.5*iHeight()*z) h=0.5*iHeight()*z;    
-        
-        cairo_move_to(cairo,-r,-h);
-        cairo_line_to(cairo,-r,h);
-        cairo_line_to(cairo,r,h);
-        cairo_line_to(cairo,r+2*z,0);
-        cairo_line_to(cairo,r,-h);      
-    	
-        cairo_close_path(cairo);		  	 
-    
-        cairo_set_source_rgb(cairo,0,0,1);
-        cairo_stroke_preserve(cairo);
-        
-        cairo::Path clipPath(cairo);
-    
-        // compute port coordinates relative to the icon's
-        // point of reference. Move outport 2 pixels right for ticket For ticket 362.
-        double x0=r, y0=0, x1=l, y1=numPorts() > 2? -h+3: 0, 
-          x2=l, y2=numPorts() > 2? h-3: 0;
-                      
-        if (textFlipped) swap(y1,y2);
-    
-        {
-          CairoSave cs(cairo);
-          cairo_identity_matrix(cairo);
-          cairo_translate(cairo, x(), y());
-          cairo_rotate(cairo, angle);
-          cairo_user_to_device(cairo, &x0, &y0);
-          cairo_user_to_device(cairo, &x1, &y1);
-          cairo_user_to_device(cairo, &x2, &y2);
-        }
-    
-        if (numPorts()>0) 
-          m_ports[0]->moveTo(x0, y0);
-        if (numPorts()>1) 
-          {
-#ifdef DISPLAY_POW_UPSIDE_DOWN
-            if (type()==OperationType::pow)
-              ports[1]->moveTo(x2, y2);
-            else
-#endif
-              m_ports[1]->moveTo(x1, y1);
-          }
-    
-        if (numPorts()>2)
-          {
-#ifdef DISPLAY_POW_UPSIDE_DOWN
-            if (type()==OperationType::pow)
-              ports[2]->moveTo(x1, y1);
-            else
-#endif
-              m_ports[2]->moveTo(x2, y2);
-          }
-
-        cs.restore(); // undo rotation
-        if (mouseFocus)
-          {
-            drawPorts(cairo);
-            displayTooltip(cairo,tooltip);
-            if (onResizeHandles) drawResizeHandles(cairo);
-          }
-          
-        cairo_new_path(cairo);          
-        clipPath.appendToCurrent(cairo);          
-        cairo_clip(cairo);          
-        if (selected) drawSelected(cairo);          
+      case 3: default:
+        m_ports[1]->moveTo(x()+rr.x(-w,0), y()+rr.y(-w,textFlipped? h-3: -h+3));
+        m_ports[2]->moveTo(x()+rr.x(-w,0), y()+rr.y(-w,textFlipped? -h+3: h-3));
         break;
       }
+    if (type()==OperationType::userFunction)
+      {
+        cairoShim.setSourceRGB(0,0,0);
+        DrawBinOpShim drawBinOp(cairoShim, zoomFactor());
+        drawBinOp.drawPort([&](){drawBinOp.drawSymbol("x");},-1.1*w,-1.1*h,rotation());
+        drawBinOp.drawPort([&](){drawBinOp.drawSymbol("y");},-1.1*w,1.1*h,rotation());
+      }
+    if (mouseFocus)
+      {
+        drawPorts(cairoShim);
+        displayTooltip(cairoShim,tooltip());
+        if (onResizeHandles) drawResizeHandles(cairoShim);             
+      }
+    // Re-create the clip path
+    cairoShim.rotate(angle);
+    cairoShim.moveTo(-w,-h);
+    cairoShim.lineTo(-w,h);
+    cairoShim.lineTo(w,h);
+    cairoShim.lineTo(w+2*z,0);
+    cairoShim.lineTo(w,-h);
+    cairoShim.closePath();
+    cairoShim.clip();
+    cairoShim.rotate(-angle);
+    if (selected) drawSelected(cairoShim);
+  }
+  
+  void OperationBase::setCachedText(cairo_t* cairo, const std::string& text, double size) const
+  {
+    if (cachedPango && cairo==cachedPango->cairoContext()) return;
+    cachedPango=make_shared<Pango>(cairo);
+    cachedPango->setMarkup(text);
+    cachedPango->setFontSize(size);
+  }
+
+  void OperationBase::draw(const ICairoShim& cairoShim) const
+  {
+    // if rotation is in 1st or 3rd quadrant, rotate as
+    // normal, otherwise flip the text so it reads L->R
+    const double angle=rotation() * M_PI / 180.0;
+    const bool textFlipped=flipped(rotation());
+    const float z=zoomFactor();
+
+    {
+      cairoShim.save();
+      cairoShim.scale(z,z);
+      iconDraw(cairoShim);
+      cairoShim.restore();
+    }
+
+        
+    cairoShim.save();
+    cairoShim.rotate(angle);
+        
+    float l=OperationBase::l*z, r=OperationBase::r*z, 
+      h=OperationBase::h*z;
+          
+    if (fabs(l)<0.5*iWidth()*z) l=-0.5*iWidth()*z;        
+    if (r<0.5*iWidth()*z) r=0.5*iWidth()*z;    
+    if (h<0.5*iHeight()*z) h=0.5*iHeight()*z;    
+        
+    cairoShim.moveTo(-r,-h);
+    cairoShim.lineTo(-r,h);
+    cairoShim.lineTo(r,h);
+    cairoShim.lineTo(r+2*z,0);
+    cairoShim.lineTo(r,-h);      
+    
+    cairoShim.closePath();		  	 
+    
+    cairoShim.setSourceRGB(0,0,1);
+    cairoShim.strokePreserve();
+
+    auto& shimImpl = dynamic_cast<const CairoShimCairo&>(cairoShim);
+    cairo::Path clipPath(shimImpl._internalGetCairoContext());
+
+    // compute port coordinates relative to the icon's
+    // point of reference. Move outport 2 pixels right for ticket For ticket 362.
+    double x0=r, y0=0, x1=l, y1=numPorts() > 2? -h+3: 0, 
+      x2=l, y2=numPorts() > 2? h-3: 0;
+                      
+    if (textFlipped) swap(y1,y2);
+    
+    {
+      cairoShim.save();
+      cairoShim.identityMatrix();
+      cairoShim.translate(x(), y());
+      cairoShim.rotate(angle);
+      cairoShim.userToDevice(x0, y0);
+      cairoShim.userToDevice(x1, y1);
+      cairoShim.userToDevice(x2, y2);
+      cairoShim.restore();
+    }
+    
+    if (numPorts()>0) 
+      m_ports[0]->moveTo(x0, y0);
+    if (numPorts()>1) 
+      {
+#ifdef DISPLAY_POW_UPSIDE_DOWN
+        if (type()==OperationType::pow)
+          ports[1]->moveTo(x2, y2);
+        else
+#endif
+          m_ports[1]->moveTo(x1, y1);
+      }
+    
+    if (numPorts()>2)
+      {
+#ifdef DISPLAY_POW_UPSIDE_DOWN
+        if (type()==OperationType::pow)
+          ports[2]->moveTo(x1, y1);
+        else
+#endif
+          m_ports[2]->moveTo(x2, y2);
+      }
+
+    cairoShim.restore(); // undo rotation
+    if (mouseFocus)
+      {
+        drawPorts(cairoShim);
+        displayTooltip(cairoShim,tooltip());
+        if (onResizeHandles) drawResizeHandles(cairoShim);
+      }
+          
+    cairoShim.newPath();
+    clipPath.appendToCurrent(shimImpl._internalGetCairoContext());
+    cairoShim.clip();          
+    if (selected) drawSelected(cairoShim);          
   }    
   
   void OperationBase::resize(const LassoBox& b)
   {
-    float invZ=1/zoomFactor();  
+    const float invZ=1/zoomFactor();  
     moveTo(0.5*(b.x0+b.x1), 0.5*(b.y0+b.y1));
     iWidth(std::abs(b.x1-b.x0)*invZ);
     iHeight(std::abs(b.y1-b.y0)*invZ);
@@ -420,8 +371,14 @@ namespace minsky
     set<string> names;
     for (size_t i=1; i<m_ports.size(); ++i)
       if (auto vv=m_ports[i]->getVariableValue())
-        for (auto& i: vv->hypercube().xvectors)
-          names.insert(i.name);
+        for (auto& xv: vv->hypercube().xvectors)
+          names.insert(xv.name);
+      else if (!m_ports[i]->wires().empty())
+        if (auto f=m_ports[i]->wires()[0]->from())
+          if (auto r=f->item().ravelCast())
+            for (auto& xv: r->hypercube().xvectors)
+              names.insert(xv.name);
+              
     return {names.begin(), names.end()};
   }
 
@@ -455,6 +412,79 @@ namespace minsky
     };
   }
 
+  Units OperationBase::unitsBinOpCase(bool check) const
+  {
+    switch (type())
+      {
+        // these binops need to have dimensionless units
+      case log: case and_: case or_: case polygamma: case userFunction:
+
+        if (check && !m_ports[1]->units(check).empty())
+          throw_error("function inputs not dimensionless");
+        return {};
+      case pow:
+        {
+          auto r=m_ports[1]->units(check);
+
+          if (!r.empty())
+            {
+              if (!m_ports[2]->wires().empty())
+                if (auto v=dynamic_cast<VarConstant*>(&m_ports[2]->wires()[0]->from()->item()))
+                  if (fracPart(v->value())==0)
+                    {
+                      for (auto& i: r) i.second*=v->value();
+                      r.normalise();
+                      return r;
+                    }
+              if (check)
+                throw_error("dimensioned pow only possible if exponent is a constant integer");
+            }
+          return r;
+        }
+        // these binops must have compatible units
+      case le: case lt: case eq:
+        {
+          if (check)
+            CheckConsistent(*this);
+          return {};
+        }
+      case add: case subtract: case max: case min:
+        {
+          if (check)
+            return CheckConsistent(*this);
+          if (!m_ports[1]->wires().empty())
+            return m_ports[1]->wires()[0]->units(check);
+          if (!m_ports[2]->wires().empty())
+            return m_ports[2]->wires()[0]->units(check);
+          return {};
+        }
+        // multiply and divide are especially computed
+      case multiply: case divide:
+        {
+          Units units;
+          for (auto w: m_ports[1]->wires())
+            {
+              auto tmp=w->units(check);
+              for (auto& i: tmp)
+                units[i.first]+=i.second;
+            }
+          const int f=(type()==multiply)? 1: -1; //indices are negated for division
+          for (auto w: m_ports[2]->wires())
+            {
+              auto tmp=w->units(check);
+              for (auto& i: tmp)
+                units[i.first]+=f*i.second;
+            }
+          units.normalise();
+          return units;
+        }
+      default:
+        if (check)
+          throw_error("Operation<"+OperationType::typeName(type())+">::units() should be overridden");
+        return {};
+      }
+  }
+  
   Units OperationBase::units(bool check) const
   {
     // default operations are dimensionless, but check that inputs are also
@@ -467,95 +497,64 @@ namespace minsky
           return {};
         }
       case constop:
-        switch (type())
-          {
-          case percent:
-            { 
-              // Add % sign to units from input to % operator. Need the first conditional otherwise Minsky crashes		
-              if (!m_ports[1]->wires().empty()) {
-                auto r=m_ports[1]->units(check);	 	 
-                if (auto vV=dynamic_cast<VariableValue*>(&m_ports[1]->wires()[0]->from()->item())) 
-                  {    
-                    vV->setUnits("%"+r.str());
-                    vV->units.normalise();
-                    return vV->units; 
-                  }
-                return r; 
-              }
-              return {};
-            }     
-          default:           
-            return {};  
-          }      
+        // Add % sign to units from input to % operator. Need the first conditional otherwise Minsky crashes		
+        if (type()==percent && !m_ports[1]->wires().empty()) {
+          auto r=m_ports[1]->units(check);	 	 
+          if (auto vV=dynamic_cast<VariableValue*>(&m_ports[1]->wires()[0]->from()->item())) 
+            {    
+              vV->setUnits("%"+r.str());
+              vV->units.normalise();
+              return vV->units; 
+            }
+          return r; 
+        }
+        return {};
       case binop:
+        return unitsBinOpCase(check);
+      case statistics:
         switch (type())
           {
-            // these binops need to have dimensionless units
-          case log: case and_: case or_: case polygamma: case userFunction:
-
-            if (check && !m_ports[1]->units(check).empty())
-              throw_error("function inputs not dimensionless");
+          case mean: case median: case stdDev:
+            return m_ports[1]->units(check);
+          case moment:
+            {
+              auto argUnits=m_ports[1]->units(check);
+              for (auto& i: argUnits)
+                i.second*=arg;
+              return argUnits;
+            }
+          case histogram:
             return {};
-          case pow:
+          case covariance:
             {
-              auto r=m_ports[1]->units(check);
-
-              if (!r.empty())
+              auto argUnits=m_ports[1]->units(check);
+              for (auto& i: m_ports[2]->units(check))
                 {
-                  if (!m_ports[2]->wires().empty())
-                    if (auto v=dynamic_cast<VarConstant*>(&m_ports[2]->wires()[0]->from()->item()))
-                      if (fracPart(v->value())==0)
-                        {
-                          for (auto& i: r) i.second*=v->value();
-                          r.normalise();
-                          return r;
-                        }
-                  if (check)
-                    throw_error("dimensioned pow only possible if exponent is a constant integer");
+                  argUnits.emplace(i.first,1); // ensure base unit is present
+                  argUnits[i.first]*=i.second;
                 }
-              return r;
+              return argUnits;
             }
-            // these binops must have compatible units
-          case le: case lt: case eq:
-            {
-              if (check)
-                CheckConsistent(*this);
-              return {};
-            }
-          case add: case subtract: case max: case min:
-            {
-              if (check)
-                return CheckConsistent(*this);
-              if (!m_ports[1]->wires().empty())
-                return m_ports[1]->wires()[0]->units(check);
-              if (!m_ports[2]->wires().empty())
-                return m_ports[2]->wires()[0]->units(check);
-              return {};
-            }
-            // multiply and divide are especially computed
-          case multiply: case divide:
-            {
-              Units units;
-              for (auto w: m_ports[1]->wires())
-                {
-                  auto tmp=w->units(check);
-                  for (auto& i: tmp)
-                    units[i.first]+=i.second;
-                }
-              int f=(type()==multiply)? 1: -1; //indices are negated for division
-              for (auto w: m_ports[2]->wires())
-                {
-                  auto tmp=w->units(check);
-                  for (auto& i: tmp)
-                    units[i.first]+=f*i.second;
-                }
-              units.normalise();
-              return units;
-            }
-          default:
+          case linearRegression:
+            return m_ports[1]->units(check);
+          case bulkLinearRegression:
             if (check)
-              throw_error("Operation<"+OperationType::typeName(type())+">::units() should be overridden");
+              {
+                // second port needs to be dimensionless, otherwise dimensions are mixed
+                if (m_ports[2])
+                  {
+                    if (!m_ports[2]->units(check).empty())
+                      throw_error("X port not dimensionless");
+                  }
+                else
+                  // TODO - how can we check the X-Vector of Y is dimensionless?
+                  ;
+              }
+            return m_ports[1]->units(check);
+          case correlation:
             return {};
+          default:
+            throw_error("Statistics operation does not have units() defined");
           }
       default:
         if (check)
@@ -571,269 +570,6 @@ namespace minsky
       r[cminsky().timeUnit]--;
     r.normalise();
     return r;
-  }
-
-  IntOpAccessor::IntOpAccessor(): ecolab::TCLAccessor<IntOp, std::string>
-    ("description",(Getter)&IntOp::description,(Setter)&IntOp::description) {}
-  
-  Units IntOp::units(bool check) const {
-    Units r=m_ports[1]->units(check);
-    if (!cminsky().timeUnit.empty())
-      r[cminsky().timeUnit]++;
-    r.normalise();
-    return r;
-  }
-  
-  bool IntOp::attachedToDefiningVar(std::set<const Item*>& visited) const
-  {
-    if (coupled()) return intVar->attachedToDefiningVar(visited);
-    return Item::attachedToDefiningVar(visited);
-  }    
- 
-  void IntOp::draw(cairo_t* cairo) const
-  { 	  
-    // if rotation is in 1st or 3rd quadrant, rotate as
-    // normal, otherwise flip the text so it reads L->R
-    double angle=rotation() * M_PI / 180.0;
-    double fm=std::fmod(rotation(),360);
-    bool textFlipped=!((fm>-90 && fm<90) || fm>270 || fm<-270);
-    double coupledIntTranslation=0;
-    float z=zoomFactor();
-    
-    float l=OperationBase::l*z, r=OperationBase::r*z, 
-      h=OperationBase::h*z;
-      
-    if (fabs(l)<iWidth()*z) l=-iWidth()*z;        
-    if (r<iWidth()*z) r=iWidth()*z;    
-    if (h<iHeight()*z) h=iHeight()*z;   
-
-    if (coupled())
-      {
-        auto& iv=*intVar;
-        //            iv.zoomFactor=zoomFactor;
-        RenderVariable rv(iv,cairo);
-        // we need to add some translation if the variable is bound
-        cairo_rotate(cairo,rotation()*M_PI/180.0);
-        coupledIntTranslation=-0.5*(intVarOffset+2*rv.width()+2+r)*z;
-        if (rv.width()<iv.iWidth()) coupledIntTranslation=-0.5*(intVarOffset+2*iv.iWidth()+2+r)*z;
-        cairo_rotate(cairo,-rotation()*M_PI/180.0);
-      }
-    
-    {
-      CairoSave cs(cairo); 
-      cairo_scale(cairo,z,z);
-      double sf = scaleFactor();  
-      cairo_scale(cairo,sf,sf);		  
-      cairo_move_to(cairo,-7,4.5);
-      cairo_show_text(cairo,"\xE2\x88\xAB");
-      cairo_show_text(cairo,"dt"); 
-    }
-        
-    int intVarWidth=0;
-    
-    CairoSave cs(cairo);
-    cairo_rotate(cairo, angle); 
-    
-    cairo_move_to(cairo,l,h);
-    cairo_line_to(cairo,l,-h);
-    cairo_line_to(cairo,r,0);     
-    
-    cairo_close_path(cairo);		  	 
-    
-    cairo_set_source_rgb(cairo,0,0,1);    
-    cairo_stroke_preserve(cairo);    
-    
-    if (coupled())
-      {
-        float ivo=intVarOffset*z;
-        cairo_new_path(cairo);
-        cairo_move_to(cairo,r,0);
-        cairo_line_to(cairo,r+ivo,0);
-        cairo_set_source_rgb(cairo,0,0,0);
-        cairo_stroke(cairo);
-     
-        // display an integration variable next to it
-        RenderVariable rv(*intVar, cairo);
-        // save the render width for later use in setting the clip
-        intVarWidth=rv.width()*z;
-        if (rv.width()<intVar->iWidth()) intVarWidth=0.5*intVar->iWidth()*z;
-        // set the port location...
-        Rotate rot(rotation(), x(), y());
-        auto ivp=rot(x()+r+ivo+intVarWidth, y());
-        intVar->moveTo(ivp.x(), ivp.y());
-         
-        {
-          CairoSave cs(cairo);
-          cairo_translate(cairo,r+ivo+intVarWidth,0);
-          // to get text to render correctly, we need to set
-          // the var's rotation, then antirotate it
-          intVar->rotation(rotation());
-          cairo_rotate(cairo, -M_PI*rotation()/180.0);
-          rv.draw();
-        }
-	 
-        // build clip path the hard way grr...
-        cairo_move_to(cairo,l,h);
-        cairo_line_to(cairo,l,-h);
-        cairo_line_to(cairo,r,0);
-        cairo_line_to(cairo,r+ivo,0);
-        float rvw=rv.width()*z, rvh=rv.height()*z;
-        if (rv.width()<intVar->iWidth()) rvw=intVar->iWidth()*z;
-        if (rv.height()<intVar->iHeight()) rvh=intVar->iHeight()*z;
-        cairo_line_to(cairo,r+ivo,-rvh);
-        cairo_line_to(cairo,r+ivo+2*rvw,-rvh);
-        cairo_line_to(cairo,r+ivo+2*rvw+2*z,0);
-        cairo_line_to(cairo,r+ivo+2*rvw,rvh);
-        cairo_line_to(cairo,r+ivo,rvh);
-        cairo_line_to(cairo,r+ivo,0);        
-        cairo_line_to(cairo,r,0);        
-        cairo_close_path(cairo);        
-      }
-    
-    cairo::Path clipPath(cairo); 
-    
-    double x0=r, y0=0, x1=l, y1=numPorts() > 2? -h+3: 0, 
-      x2=l, y2=numPorts() > 2? h-3: 0;
-                  
-    if (textFlipped) swap(y1,y2);
-	
-    // adjust for integration variable
-    if (coupled())
-      x0+=intVarOffset+2*intVarWidth+2;
-	
-    {
-      CairoSave cs(cairo);
-      cairo_identity_matrix(cairo);
-      cairo_translate(cairo, x(), y());
-      cairo_rotate(cairo, angle);
-      cairo_user_to_device(cairo, &x0, &y0);
-      cairo_user_to_device(cairo, &x1, &y1);
-      cairo_user_to_device(cairo, &x2, &y2);
-    }
-    
-    if (numPorts()>0) 
-      m_ports[0]->moveTo(x0, y0);
-    if (numPorts()>1) 
-      m_ports[1]->moveTo(x1, y1);
-    if (numPorts()>2)
-      m_ports[2]->moveTo(x2, y2);
-	
-    cairo_translate(cairo,-coupledIntTranslation,0);        
-    cs.restore(); // undo rotation
-    if (mouseFocus)
-      {
-        drawPorts(cairo);
-        displayTooltip(cairo,tooltip);
-      }
-    if (onResizeHandles) drawResizeHandles(cairo);  
-	
-    cairo_new_path(cairo);
-    clipPath.appendToCurrent(cairo);
-    cairo_clip(cairo);          
-    if (selected) drawSelected(cairo);       
-  }
-  
-  void IntOp::resize(const LassoBox& b)
-  {
-    float invZ=1.0/zoomFactor();
-    this->moveTo(0.5*(b.x0+b.x1), 0.5*(b.y0+b.y1));
-    iWidth(0.5*std::abs(b.x1-b.x0)*invZ);
-    // Ensure int op height and var height similar to make gripping resize handle easier. for ticket 1203.
-    iHeight(0.25*std::abs(b.y1-b.y0)*invZ);
-    intVar->iWidth(0.5*std::abs(b.x1-b.x0)*invZ);
-    intVar->iHeight(0.5*std::abs(b.y1-b.y0)*invZ);
-    bb.update(*this);	  
-  }
-  
-  void IntOp::insertControlled(Selection& selection)
-  {
-    selection.ensureItemInserted(intVar);
-  }
-  
-  IntOp& IntOp::operator=(const IntOp& x)
-  {
-    Super::operator=(x); 
-    intVar.reset(x.intVar->clone());
-    return *this;
-  }
-
-  void IntOp::removeControlledItems(minsky::Group& g) const
-  {
-    if (intVar)
-      g.removeItem(*intVar);
-  }
-  
-  string IntOp::description(const string& a_desc)
-  {
-    auto desc=a_desc;
-    
-    // set a default name if none given
-    if (desc.empty())
-      desc=minsky().variableValues.newName
-        (VariableValue::valueId(group.lock(),"int"));
-
-    // disallow global integration variables
-    if (desc[0]==':') desc=desc.substr(1);
-    
-    if (intVar && intVar->type()==VariableType::integral &&
-        intVar->group.lock() == group.lock() && intVar->name()==desc)
-      return description(); // nothing to do
-
-    vector<Wire> savedWires;
-    if (intVar && intVar->portsSize()>0)
-      {
-        // save any attached wires for later use
-        for (auto w: intVar->ports(0).lock()->wires())
-          savedWires.push_back(*w);
-      }
-
-    // if the variable name exists, and already has a connected
-    // input, then it is not a candidate for being an integral
-    // variable, so generate a new name that doesn't currently
-    // exist
-
-    string vid=VariableValue::valueId(group.lock(),desc);
-    auto i=minsky().variableValues.find(vid);      
-    if (i!=minsky().variableValues.end()) 
-      {
-        if (i->second->type()!=VariableType::integral) 
-          try
-            {
-              minsky().convertVarType(vid, VariableType::integral);
-            }
-          catch (...)
-            {
-              desc=minsky().variableValues.newName(vid);
-            }
-        else
-          if (minsky().definingVar(vid))               // Also check that integral has input. for ticket 1068.
-            desc=minsky().variableValues.newName(vid);
-          else 
-            desc=vid; 
-        if (desc[0]==':') desc=desc.substr(1);// disallow global integration variables
-      }
-    
-    
-    ItemPtr oldIvar;
-    if (intVar)
-      oldIvar=minsky().model->removeItem(*intVar);
-
-    intVar.reset(new Variable<VariableType::integral>(desc));
-    if (auto g=group.lock())
-      intVar->controller=g->findItem(*this); // we're managing our own display
-    // initialise in toggled state
-    m_coupled=true;
-    
-    // recreate any previously attached wires, initially in global group.
-    for (auto& w: savedWires)
-      minsky().model->addWire(new Wire(intVar->ports(0), w.to(), w.coords()));
-
-    bb.update(*this); // adjust icon bounding box - see ticket #704
-    
-    // this should also adjust the wire's group ownership appropriately
-    if (auto g=group.lock())
-      g->addItem(intVar);
-    return description();
   }
 
   namespace
@@ -857,51 +593,15 @@ namespace minsky
       }
   }
 
-  bool IntOp::toggleCoupled()
-  {
-    if (type()!=integrate) return false;
-
-    assert(intVar);
-
-    assert(m_ports.size()==3);
-    if (m_coupled) 
-      {
-        WirePtr newWire(new Wire(m_ports[0], intVar->ports(1)));
-        if (auto g=group.lock())
-          g->addWire(newWire);
-        else
-          minsky().model->addWire(newWire);
-        intVar->controller.reset();
-        intVar->rotation(rotation());
-      }
-    else
-      {
-        if (auto g=group.lock())
-          {
-            for (auto w: intVar->ports(1).lock()->wires())
-              g->removeWire(*w);
-            intVar->controller=g->findItem(*this);
-          }
-        intVar->mouseFocus=false; // prevent drawing of variable ports when coupled
-      }
-    m_coupled=!m_coupled;
-    bb.update(*this); // adjust bounding box for coupled integral operation - see ticket #1055  
-    return coupled();
-  }
-
   string OperationBase::portValues() const
   {
     string r="equations not yet constructed, please reset";
-    if (!m_ports.empty() && m_ports[0]->value()==fabs(numeric_limits<double>::max())) // format outport value for infty operator. for ticket 1188 and feature 50.
-      {
-        std::stringstream ss;
-        ss <<"[out]="<<m_ports[0]->value();		
-        r=ss.str();
-      } else r="[out]="+to_string(m_ports[0]->value());
+    if (!m_ports.empty())
+      r="[out]="+str(m_ports[0]->value());
     if (m_ports.size()>1)
-      r+=" [in1]="+ to_string(m_ports[1]->value());
+      r+=" [in1]="+ str(m_ports[1]->value());
     if (m_ports.size()>2)
-      r+=" [in2]="+ to_string(m_ports[2]->value());
+      r+=" [in2]="+ str(m_ports[2]->value());
     return r;
   }
   
@@ -917,680 +617,739 @@ namespace minsky
     return m_description;
   }    
 
-  void DataOp::readData(const string& fileName)
-  {
-    ifstream f(fileName.c_str());
-    data.clear();
-    // for now, we just read pairs of numbers, separated by
-    // whitespace. Later, we need to add in the smarts to handle a
-    // variety of CSV formats
-    double x, y;
-    while (f>>x>>y)
-      data[x]=y; // TODO: throw if more than one equal value of x provided?
-
-    // trim any leading directory
-    size_t p=fileName.rfind('/');
-    // '/' is guaranteed not to be in fileName, so we can use that as
-    // a delimiter
-    description("\\verb/"+
-                ((p!=string::npos)? fileName.substr(p+1): fileName) + "/");
-  }
-
-  void DataOp::initRandom(double xmin, double xmax, unsigned numSamples)
-  {
-    data.clear();
-    double dx=(xmax-xmin)/numSamples;
-    for (double x=xmin; x<xmax; x+=dx) //NOLINT
-      data[x]=double(rand())/RAND_MAX;
-  }
-
-  double DataOp::interpolate(double x) const
-  {
-    // not terribly sensible, but need to return something
-    if (data.empty()) return 0;
-
-    map<double, double>::const_iterator v=data.lower_bound(x);
-    if (v==data.end())
-      return data.rbegin()->second;
-    if (v==data.begin())
-      return v->second;
-    if (v->first > x)
-      {
-        map<double, double>::const_iterator v0=v;
-        --v0;
-        return (x-v0->first)*(v->second-v0->second)/
-          (v->first-v0->first)+v0->second;
-      }
-    assert(v->first==x);
-    return v->second;
-  }
-
-  double DataOp::deriv(double x) const
-  {
-    map<double, double>::const_iterator v=data.lower_bound(x);
-    if (v==data.end() || v==data.begin())
-      return 0;
-    map<double, double>::const_iterator v1=v, v2=v; 
-    --v1;
-    if (v->first==x)
-      {
-        ++v2;
-        if (v2==data.end()) v2=v;
-        return (v2->second-v1->second)/(v2->first-v1->first);
-      }
-    return (v->second-v1->second)/(v->first-v1->first);
-  }
-
   // virtual draw methods for operations - defined here rather than
   // operations.cc because it is more related to the functionality in
   // this file.
 
-  template <> void Operation<OperationType::constant>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::constant>::iconDraw(const ICairoShim& cairoShim) const
   {
     assert(false); //shouldn't be here
   }
 
-  template <> void Operation<OperationType::ravel>::iconDraw(cairo_t* cairo) const
+
+  template <> void Operation<OperationType::ravel>::iconDraw(const ICairoShim& cairoShim) const
   {
     assert(false); //shouldn't be here
   }
 
-  template <> void Operation<OperationType::data>::iconDraw(cairo_t* cairo) const
+
+  template <> void Operation<OperationType::data>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor();  
-    cairo_translate(cairo,-1,0);
-    cairo_scale(cairo,1.5*sf,0.75*sf);
-    cairo_arc(cairo,0,-3,3,0,2*M_PI);
-    cairo_arc(cairo,0,3,3,0,M_PI);
-    cairo_move_to(cairo,-3,3);
-    cairo_line_to(cairo,-3,-3);
-    cairo_move_to(cairo,3,3);
-    cairo_line_to(cairo,3,-3);
-    cairo_identity_matrix(cairo);
-    cairo_set_line_width(cairo,1.0);  
-    cairo_stroke(cairo); 
+    const double sf = scaleFactor();
+    cairoShim.translate(-1,0);
+    cairoShim.scale(1.5*sf,0.75*sf);
+    cairoShim.arc(0,-3,3,0,2*M_PI);
+    cairoShim.arc(0,3,3,0,M_PI);
+    cairoShim.moveTo(-3,3);
+    cairoShim.lineTo(-3,-3);
+    cairoShim.moveTo(3,3);
+    cairoShim.lineTo(3,-3);
+    cairoShim.identityMatrix();
+    cairoShim.setLineWidth(1.0);
+    cairoShim.stroke();
   }
 
-  template <> void Operation<OperationType::time>::iconDraw(cairo_t* cairo) const
+
+  template <> void Operation<OperationType::time>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor();  
-    cairo_scale(cairo,sf,sf);	  	  
-    cairo_move_to(cairo,-4,2);
-    cairo_show_text(cairo,"t");
-  }
-  
-  template <> void Operation<OperationType::euler>::iconDraw(cairo_t* cairo) const
-  {
-    double sf = scaleFactor();  
-    cairo_scale(cairo,sf,sf);		  
-    cairo_move_to(cairo,-4,2);
-    cairo_show_text(cairo,"e");
-  }
-  
-  template <> void Operation<OperationType::pi>::iconDraw(cairo_t* cairo) const
-  {
-    double sf = scaleFactor();  
-    cairo_scale(cairo,sf,sf);		  
-    cairo_move_to(cairo,-4,2);
-    cairo_show_text(cairo,"π");
-  }           
-   
-  template <> void Operation<OperationType::zero>::iconDraw(cairo_t* cairo) const
-  {
-    double sf = scaleFactor();  
-    cairo_scale(cairo,sf,sf);		  
-    cairo_move_to(cairo,-4,2);
-    cairo_show_text(cairo,"0");
-  }
-  
-  template <> void Operation<OperationType::one>::iconDraw(cairo_t* cairo) const
-  {
-    double sf = scaleFactor();  
-    cairo_scale(cairo,sf,sf);		  
-    cairo_move_to(cairo,-4,2);
-    cairo_show_text(cairo,"1");
-  }
-  
-  template <> void Operation<OperationType::inf>::iconDraw(cairo_t* cairo) const
-  {
-    double sf = scaleFactor();  	  
-    cairo_move_to(cairo,-4,-10);
-    Pango pango(cairo);
-    pango.setFontSize(9*sf);
-    pango.setMarkup("∞");
-    pango.show();    
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-4,-10);
+    cairoShim.showText("t");
   }
 
-  template <> void Operation<OperationType::percent>::iconDraw(cairo_t* cairo) const
-  {
-    double sf = scaleFactor(); 	     
-    cairo_move_to(cairo,-4,-7);
-    Pango pango(cairo);
-    pango.setFontSize(7*sf);
-    pango.setMarkup("%");
-    pango.show();
-  }   
 
-  template <> void Operation<OperationType::copy>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::euler>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor();  	  	  
-    cairo_move_to(cairo,-4,-5);
-    Pango pango(cairo);
-    pango.setFontSize(7*sf);
-    pango.setMarkup("→");
-    pango.show();
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-4,-10);
+    cairoShim.showText("e");
   }
 
-  template <> void Operation<OperationType::integrate>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::pi>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-4,-10);
+    cairoShim.showText("π");
+  }
+
+  template <> void Operation<OperationType::zero>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-4,-10);
+    cairoShim.showText("0");
+  }
+
+  template <> void Operation<OperationType::one>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-4,-10);
+    cairoShim.showText("1");
+  }
+
+  template <> void Operation<OperationType::inf>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.moveTo(-4,-8);
+    cairoShim.scale(sf,sf);
+    cairoShim.showText("∞",9);
+  }
+
+
+  template <> void Operation<OperationType::percent>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.moveTo(-4,-8);
+    cairoShim.scale(sf,sf);
+    cairoShim.showText("%",9);
+  }
+
+  template <> void Operation<OperationType::copy>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.moveTo(-4,-10);
+    cairoShim.scale(sf,sf);
+    cairoShim.showText("→",10);
+  }
+
+  template <> void Operation<OperationType::integrate>::iconDraw(const ICairoShim& cairoShim) const
   {/* moved to IntOp::draw() but needs to be here, and is actually called */}
-  
-  template <> void Operation<OperationType::differentiate>::iconDraw(cairo_t* cairo) const
-  { 
-    CairoSave cs(cairo);
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	  
-    cairo_move_to(cairo,-7,-1);
-    cairo_set_font_size(cairo,8);
-    cairo_show_text(cairo,"d");
-    cairo_move_to(cairo,-7,0);cairo_line_to(cairo,2,0);
-    cairo_set_line_width(cairo,0.5);cairo_stroke(cairo);
-    cairo_move_to(cairo,-7,7);
-    cairo_show_text(cairo,"dt");
-  }
 
-  template <> void Operation<OperationType::sqrt>::iconDraw(cairo_t* cairo) const
-  {	  
-    CairoSave cs(cairo);
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	  
-    cairo_set_font_size(cairo,10);   
-    cairo_move_to(cairo,-7,6);
-    cairo_show_text(cairo,"\xE2\x88\x9a");
-    cairo_set_line_width(cairo,0.5);
-    cairo_rel_move_to(cairo,0,-9);
-    cairo_rel_line_to(cairo,5,0);
-    cairo_set_source_rgb(cairo,0,0,0);
-    cairo_stroke(cairo);    
-  }
-
-  template <> void Operation<OperationType::exp>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::differentiate>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	    
-    cairo_move_to(cairo,-7,3);
-    cairo_show_text(cairo,"e");
-    cairo_rel_move_to(cairo,0,-4);
-    cairo_set_font_size(cairo,7);
-    cairo_show_text(cairo,"x");
+    cairoShim.save();
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-7,-12);
+    cairoShim.showText("d",8);
+    cairoShim.moveTo(-7,0); cairoShim.lineTo(2,0);
+    cairoShim.setLineWidth(0.5); cairoShim.stroke();
+    cairoShim.moveTo(-7,0);
+    cairoShim.showText("dt",8);
+    cairoShim.restore();
   }
 
-  template <> void Operation<OperationType::pow>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::sqrt>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	  	  
-    cairo_move_to(cairo,-6,3);
-    cairo_show_text(cairo,"x");
-    cairo_rel_move_to(cairo,0,-4);
-    cairo_set_font_size(cairo,7);
-    cairo_show_text(cairo,"y");
-    cairo_set_font_size(cairo,5);
-    cairo_move_to(cairo, l+1, -h+6);
+    cairoShim.save();
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-7,-10);
+    cairoShim.showText("√̱x");
+    cairoShim.restore();
+  }
+
+  template <> void Operation<OperationType::exp>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-7,-10);
+    cairoShim.showText("eˣ");
+    cairoShim.relMoveTo(0,-4);
+  }
+
+
+  template <> void Operation<OperationType::pow>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-6,-10);
+    cairoShim.showText("xʸ");
+    cairoShim.relMoveTo(0,-4);
+    DrawBinOpShim d(cairoShim);
 #ifdef DISPLAY_POW_UPSIDE_DOWN
-    cairo_show_text(cairo,"y");
+    d.drawPort([&](){d.drawSymbol("y");}, l, -h, rotation());
+    d.drawPort([&](){d.drawSymbol("x");}, l, h, rotation());
 #else
-    cairo_show_text(cairo,"x");
-#endif
-    cairo_move_to(cairo, l+1, h-3);
-#ifdef DISPLAY_POW_UPSIDE_DOWN
-    cairo_show_text(cairo,"x");
-#else
-    cairo_show_text(cairo,"y");
+    d.drawPort([&](){d.drawSymbol("x");}, l, -h, rotation());
+    d.drawPort([&](){d.drawSymbol("y");}, l, h, rotation());
 #endif
   }
 
-  template <> void Operation<OperationType::le>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::le>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	 	  
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"≤");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-9,-6);
+    cairoShim.showText("x≤y",8);
+    DrawBinOpShim d(cairoShim);
+    d.drawPort([&](){d.drawSymbol("x");}, l, -h, rotation());
+    d.drawPort([&](){d.drawSymbol("y");}, l, h, rotation());
   }
 
-  template <> void Operation<OperationType::lt>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::lt>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	 	  
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"<");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-9,-6);
+    cairoShim.showPlainText("x<y",8);
+    DrawBinOpShim d(cairoShim);
+    d.drawPort([&](){d.drawSymbol("x");}, l, -h, rotation());
+    d.drawPort([&](){d.drawSymbol("y");}, l, h, rotation());
   }
 
-  template <> void Operation<OperationType::eq>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::eq>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	 	  
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"=");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-9,-6);
+    cairoShim.showText("x=y",8);
+    DrawBinOpShim d(cairoShim);
+    d.drawPort([&](){d.drawSymbol("x");}, l, -h, rotation());
+    d.drawPort([&](){d.drawSymbol("y");}, l, h, rotation());
   }
 
-  template <> void Operation<OperationType::min>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::min>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	   
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"min");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-10,-10);
+    cairoShim.showText("min",9);
   }
 
-  template <> void Operation<OperationType::max>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::max>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	  
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"max");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-10,-10);
+    cairoShim.showText("max",9);
   }
 
-  template <> void Operation<OperationType::and_>::iconDraw(cairo_t* cairo) const
-  {	  
-    CairoSave cs(cairo);
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	   
-    cairo_set_source_rgb(cairo,0,0,0);
-    cairo_move_to(cairo,-4,3);
-    cairo_line_to(cairo,-1,-3);
-    cairo_line_to(cairo,2,3);
-    cairo_stroke(cairo);
+  template <> void Operation<OperationType::and_>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    cairoShim.save();
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.setSourceRGB(0,0,0);
+    cairoShim.moveTo(-4,3);
+    cairoShim.lineTo(-1,-3);
+    cairoShim.lineTo(2,3);
+    cairoShim.stroke();
+    cairoShim.restore();
   }
 
-  template <> void Operation<OperationType::or_>::iconDraw(cairo_t* cairo) const
-  {  
-    CairoSave cs(cairo);
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	 
-    cairo_set_source_rgb(cairo,0,0,0);
-    cairo_move_to(cairo,-4,-3);
-    cairo_line_to(cairo,-1,3);
-    cairo_line_to(cairo,2,-3);
-    cairo_stroke(cairo);
+  template <> void Operation<OperationType::or_>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    cairoShim.save();
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.setSourceRGB(0,0,0);
+    cairoShim.moveTo(-4,-3);
+    cairoShim.lineTo(-1,3);
+    cairoShim.lineTo(2,-3);
+    cairoShim.stroke();
+    cairoShim.restore();
   }
 
-  template <> void Operation<OperationType::not_>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::not_>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf); 
-    cairo_move_to(cairo,-6,3);
-    cairo_show_text(cairo,"¬");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-6,-10);
+    cairoShim.showText("¬");
+  }
+  template <> void Operation<OperationType::covariance>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.scale(sf*.7,sf);
+    cairoShim.moveTo(-16,-5);
+    cairoShim.showPlainText("<ΔxΔy>",5);
   }
 
-  template <> void Operation<OperationType::ln>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::correlation>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf); 
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo," ln");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-3,-10);
+    cairoShim.showText("ρ");
   }
 
-  template <> void Operation<OperationType::log>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::linearRegression>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	  
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"log");
-    cairo_rel_move_to(cairo,0,3);
-    cairo_set_font_size(cairo,7);
-    cairo_show_text(cairo,"b");
-    cairo_set_font_size(cairo,5);
-    cairo_move_to(cairo, l+1, -h+6);
-    cairo_show_text(cairo,"x");
-    cairo_move_to(cairo, l+1, h-3);
-    cairo_show_text(cairo,"b");
-  
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-7,7);
+    cairoShim.lineTo(7,-7);
+    cairoShim.stroke();
+    cairoShim.arc(-4,0,0.2,0,2*M_PI);
+    cairoShim.stroke();
+    cairoShim.arc(3,3,0.2,0,2*M_PI);
+    cairoShim.stroke();
+    cairoShim.arc(4,-6,0.2,0,2*M_PI);
+    cairoShim.stroke();
   }
 
-  template <> void Operation<OperationType::sin>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::bulkLinearRegression>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);  
-    cairo_set_font_size(cairo,10);
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"sin");
+    const double sf = scaleFactor(); 	     
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-6,6);
+    cairoShim.lineTo(6,-6);
+    cairoShim.stroke();
+    cairoShim.arc(-4,0,0.2,0,2*M_PI);
+    cairoShim.stroke();
+    cairoShim.arc(3,3,0.2,0,2*M_PI);
+    cairoShim.stroke();
+    cairoShim.arc(4,-6,0.2,0,2*M_PI);
+    cairoShim.stroke();
+    cairoShim.moveTo(-6,-7.5);
+    cairoShim.lineTo(-7.5,-7.5);
+    cairoShim.lineTo(-7.5,7.5);
+    cairoShim.lineTo(-6,7.5);
+    cairoShim.stroke();
+    cairoShim.moveTo(6,-7.5);
+    cairoShim.lineTo(7.5,-7.5);
+    cairoShim.lineTo(7.5,7.5);
+    cairoShim.lineTo(6,7.5);
+    cairoShim.stroke();
+  }
+  template <> void Operation<OperationType::ln>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-9,-10);
+    cairoShim.showText(" ln");
   }
 
-  template <> void Operation<OperationType::cos>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::log>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	  
-    cairo_set_font_size(cairo,10);
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"cos");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-8,-10);
+    cairoShim.showText("log",9);
+    DrawBinOpShim d(cairoShim);
+    d.drawPort([&](){d.drawSymbol("x");}, l, -h, rotation());
+    d.drawPort([&](){d.drawSymbol("b");}, l, h, rotation());
   }
 
-  template <> void Operation<OperationType::tan>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::sin>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf); 
-    cairo_set_font_size(cairo,10);
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"tan");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-8,-10);
+    cairoShim.showText("sin",9);
   }
 
-  template <> void Operation<OperationType::asin>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::cos>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf); 
-    cairo_set_font_size(cairo,9);
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"sin");
-    cairo_rel_move_to(cairo,0,-3);
-    cairo_set_font_size(cairo,7);
-    cairo_show_text(cairo,"-1");
-    cairo_rel_move_to(cairo,0,-2);
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-8,-10);
+    cairoShim.showText("cos",9);
   }
 
-  template <> void Operation<OperationType::acos>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::tan>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);  
-    cairo_set_font_size(cairo,9);
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"cos");
-    cairo_rel_move_to(cairo,0,-3);
-    cairo_set_font_size(cairo,7);
-    cairo_show_text(cairo,"-1");
-    cairo_rel_move_to(cairo,0,-2);
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-8,-10);
+    cairoShim.showText("tan",9);
   }
 
-  template <> void Operation<OperationType::atan>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::asin>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);  
-    cairo_set_font_size(cairo,9);
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"tan");
-    cairo_rel_move_to(cairo,0,-3);
-    cairo_set_font_size(cairo,7);
-    cairo_show_text(cairo,"-1");
-    cairo_rel_move_to(cairo,0,-2);
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-10,-8);
+    cairoShim.showText("sin⁻¹",7);
   }
 
-  template <> void Operation<OperationType::sinh>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::acos>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	  
-    cairo_set_font_size(cairo,8);
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"sinh");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-10,-8);
+    cairoShim.showText("cos⁻¹",7);
   }
 
-  template <> void Operation<OperationType::cosh>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::atan>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);  
-    cairo_set_font_size(cairo,8);
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"cosh");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-10,-8);
+    cairoShim.showText("tan⁻¹",7);
   }
 
-  template <> void Operation<OperationType::tanh>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::sinh>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	  
-    cairo_set_font_size(cairo,8);
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"tanh");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-9,-9);
+    cairoShim.showText("sinh",8);
   }
 
-  template <> void Operation<OperationType::abs>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::cosh>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	  
-    cairo_set_font_size(cairo,9);
-    cairo_move_to(cairo,-6,3);
-    cairo_show_text(cairo,"|x|");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-11,-9);
+    cairoShim.showText("cosh",8);
   }
-  template <> void Operation<OperationType::floor>::iconDraw(cairo_t* cairo) const
+
+  template <> void Operation<OperationType::tanh>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_move_to(cairo,-7,-7);
-    Pango pango(cairo);
-    pango.setFontSize(7*sf);
-    pango.setMarkup("⌊x⌋");
-    pango.show();
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-9,-9);
+    cairoShim.showText("tanh",8);
   }
-  template <> void Operation<OperationType::frac>::iconDraw(cairo_t* cairo) const
+
+  template <> void Operation<OperationType::abs>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf); 
-    cairo_set_font_size(cairo,8);
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"frac");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-6,-9);
+    cairoShim.showText("|x|",9);
   }
-  template <> void Operation<OperationType::Gamma>::iconDraw(cairo_t* cairo) const
+
+  template <> void Operation<OperationType::floor>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf); 	  
-    cairo_move_to(cairo,-6,3);
-    cairo_show_text(cairo,"Γ");
-  }     
-  template <> void Operation<OperationType::polygamma>::iconDraw(cairo_t* cairo) const
+    const double sf = scaleFactor();
+    cairoShim.moveTo(-5,-5);
+    cairoShim.scale(sf,sf);
+    TextProperties tp("x",7);
+    cairoShim.showText(tp);
+    cairoShim.moveTo(-7,-4);
+    auto bbox=cairoShim.textExtents(tp);
+    cairoShim.relLineTo(0,bbox.height-2);
+    cairoShim.relLineTo(1,0);
+    cairoShim.relMoveTo(3+bbox.width,-bbox.height+2);
+    cairoShim.relLineTo(0,bbox.height-2);
+    cairoShim.relLineTo(-1,0);
+    cairoShim.stroke();
+  }
+
+  template <> void Operation<OperationType::frac>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf); 	  
-    cairo_move_to(cairo,-7,3);
-    cairo_show_text(cairo,"ψ");
-    cairo_rel_move_to(cairo,0,-3);
-    cairo_set_font_size(cairo,7);
-    // show order of polygamma function. 0 is default.
-    std::string order="("+to_string(static_cast<unsigned>(m_ports[2]->value()))+")";
-    cairo_show_text(cairo,order.c_str());
-    cairo_rel_move_to(cairo,0,-2);
-  }     
-  template <> void Operation<OperationType::fact>::iconDraw(cairo_t* cairo) const
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-8,-9);
+    cairoShim.showText("frac",8);
+  }
+
+  template <> void Operation<OperationType::Gamma>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf); 	  
-    cairo_move_to(cairo,-3,3);
-    cairo_show_text(cairo,"!");
-  }      
-  template <> void Operation<OperationType::add>::iconDraw(cairo_t* cairo) const
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-6,-10);
+    cairoShim.showText("Γ");
+  }
+
+  template <> void Operation<OperationType::polygamma>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf); 	  
-    DrawBinOp d(cairo);
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-7,-10);
+    cairoShim.showText("ψ");
+    cairoShim.relMoveTo(10,0);
+    const TextProperties order("("+to_string(static_cast<unsigned>(m_ports[2]->value()))+")",5);
+    cairoShim.showText(order);
+    cairoShim.relMoveTo(0,-2);
+    DrawBinOpShim d(cairoShim);
+    d.drawPort([&](){d.drawSymbol("x");}, l, -h, rotation());
+    d.drawPort([&](){d.drawSymbol("n");}, l, h, rotation());
+  }
+
+  template <> void Operation<OperationType::fact>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-3,-10);
+    cairoShim.showText("x!");
+  }
+
+  template <> void Operation<OperationType::add>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    DrawBinOpShim d(cairoShim);
     d.drawPlus();
-    d.drawPort(&DrawBinOp::drawPlus, l, h, rotation());
-    d.drawPort(&DrawBinOp::drawPlus, l, -h, rotation());
+    d.drawPort([&](){d.drawPlus();}, l, h, rotation());
+    d.drawPort([&](){d.drawPlus();}, l, -h, rotation());
   }
 
-  template <> void Operation<OperationType::subtract>::iconDraw(cairo_t* cairo) const
+
+  template <> void Operation<OperationType::subtract>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	  
-    DrawBinOp d(cairo);
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    DrawBinOpShim d(cairoShim);
     d.drawMinus();
-    d.drawPort(&DrawBinOp::drawPlus, l, -h, rotation());
-    d.drawPort(&DrawBinOp::drawMinus, l, h, rotation());
+    d.drawPort([&](){d.drawPlus();}, l, -h, rotation());
+    d.drawPort([&](){d.drawMinus();}, l, h, rotation());
   }
 
-  template <> void Operation<OperationType::multiply>::iconDraw(cairo_t* cairo) const
+
+  template <> void Operation<OperationType::multiply>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);  
-    DrawBinOp d(cairo);
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    DrawBinOpShim d(cairoShim);
     d.drawMultiply();
-    d.drawPort(&DrawBinOp::drawMultiply, l, h, rotation());
-    d.drawPort(&DrawBinOp::drawMultiply, l, -h, rotation());
+    d.drawPort([&](){d.drawMultiply();}, l, h, rotation());
+    d.drawPort([&](){d.drawMultiply();}, l, -h, rotation());
   }
 
-  template <> void Operation<OperationType::divide>::iconDraw(cairo_t* cairo) const
+
+  template <> void Operation<OperationType::divide>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	  
-    DrawBinOp d(cairo);
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    DrawBinOpShim d(cairoShim);
     d.drawDivide();
-    d.drawPort(&DrawBinOp::drawMultiply, l, -h, rotation());
-    d.drawPort(&DrawBinOp::drawDivide, l, h, rotation());
+    d.drawPort([&](){d.drawMultiply();}, l, -h, rotation());
+    d.drawPort([&](){d.drawDivide();}, l, h, rotation());
   }
 
-  template <> void Operation<OperationType::sum>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::sum>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_move_to(cairo,-4,-7);
-    Pango pango(cairo);
-    pango.setFontSize(7*sf);
-    pango.setMarkup("∑");
-    pango.show();
+    const double sf = scaleFactor();
+    cairoShim.moveTo(-4,-7);
+    cairoShim.scale(sf,sf);
+    cairoShim.showText("∑",7);
   }
 
-  template <> void Operation<OperationType::product>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::product>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_move_to(cairo,-4,-7);
-    Pango pango(cairo);
-    pango.setFontSize(7*sf);
-    pango.setMarkup("∏");
-    pango.show();
+    const double sf = scaleFactor();
+    cairoShim.moveTo(-4,-7);
+    cairoShim.scale(sf,sf);
+    cairoShim.showText("∏",7);
   }
 
-  template <> void Operation<OperationType::infimum>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::infimum>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);
-    cairo_set_font_size(cairo,10);
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"inf");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-9,-10);
+    cairoShim.showText("inf",9);
   }
 
-  template <> void Operation<OperationType::supremum>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::supremum>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);  
-    cairo_set_font_size(cairo,10);
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"sup");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-9,-10);
+    cairoShim.showText("sup",9);
   }
-  
-  template <> void Operation<OperationType::infIndex>::iconDraw(cairo_t* cairo) const
+
+  template <> void Operation<OperationType::infIndex>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	  
-    cairo_set_font_size(cairo,10);
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"infi");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-9,-10);
+    cairoShim.showText("infi",9);
   }
 
-  template <> void Operation<OperationType::supIndex>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::supIndex>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);  
-    cairo_set_font_size(cairo,10);
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"supi");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-10,-10);
+    cairoShim.showText("supi",9);
   }
 
-  template <> void Operation<OperationType::any>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::any>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf); 
-    cairo_set_font_size(cairo,10);
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"any");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-9,-10);
+    cairoShim.showText("any",10);
   }
 
-  template <> void Operation<OperationType::all>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::all>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);	  
-    cairo_set_font_size(cairo,10);
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"all");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-9,-10);
+    cairoShim.showText("all",10);
   }
 
-  template <> void Operation<OperationType::runningSum>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::size>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_move_to(cairo,-7,-7);
-    Pango pango(cairo);
-    pango.setFontSize(7*sf);
-    pango.setMarkup("∑+");
-    pango.show();
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-9,-10);
+    cairoShim.showText("nᵢ",10);
   }
 
-  template <> void Operation<OperationType::runningProduct>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::shape>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_move_to(cairo,-6,-7);
-    Pango pango(cairo);
-    pango.setFontSize(7*sf);
-    pango.setMarkup("∏×");
-    pango.show();
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-9,-10);
+    cairoShim.showText("{nᵢ}",10);
   }
 
-  template <> void Operation<OperationType::difference>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::mean>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_move_to(cairo,-4,-7);
-    Pango pango(cairo);
-    pango.setFontSize(7*sf);
-    pango.setMarkup("Δ");
-    pango.show();
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-8,-10);
+    cairoShim.showPlainText("<x>",10);
   }
 
-  template <> void Operation<OperationType::innerProduct>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::median>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_move_to(cairo,-4,-10);
-    Pango pango(cairo);
-    pango.setFontSize(14*sf);
-    pango.setMarkup("·");
-    pango.show();
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-3,-10);
+    cairoShim.showText("x",10);
+    cairoShim.moveTo(-4,-15);
+    cairoShim.showText("~",10);
   }
 
-  template <> void Operation<OperationType::outerProduct>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::stdDev>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_move_to(cairo,-4,-10);
-    Pango pango(cairo);
-    pango.setFontSize(10*sf);
-    pango.setMarkup("⊗");
-    pango.show();
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-3,-10);
+    cairoShim.showText("σ",10);
   }
 
-  template <> void Operation<OperationType::index>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::moment>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);  
-    cairo_set_font_size(cairo,10);
-    cairo_move_to(cairo,-9,3);
-    cairo_show_text(cairo,"idx");
+    const double sf = scaleFactor();
+    cairoShim.scale(sf*.85,sf);
+    cairoShim.moveTo(-12,-8);
+    cairoShim.showPlainText("<Δxᵏ>",7);
   }
 
-  template <> void Operation<OperationType::gather>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::histogram>::iconDraw(const ICairoShim& cairoShim) const
   {
-    double sf = scaleFactor(); 	     
-    cairo_scale(cairo,sf,sf);  
-    cairo_set_font_size(cairo,8);
-    cairo_move_to(cairo,-7,3);
-    cairo_show_text(cairo,"x[i]");
-    cairo_set_font_size(cairo,5);
-    cairo_move_to(cairo, l+1, -h+6);
-    cairo_show_text(cairo,"x");
-    cairo_move_to(cairo, l+1, h-3);
-    cairo_show_text(cairo,"i");
+    cairoShim.translate(-0.5*iWidth(),-0.5*iHeight());
+    cairoShim.renderSVG(cminsky().histogramResource, iWidth(), iHeight());
   }
 
- 
+  template <> void Operation<OperationType::runningSum>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.moveTo(-7,-7);
+    cairoShim.scale(sf,sf);
+    cairoShim.showText("∑+",7);
+  }
 
-  template <> void Operation<OperationType::numOps>::iconDraw(cairo_t* cairo) const
+  template <> void Operation<OperationType::runningAv>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.moveTo(-7,-7);
+    cairoShim.scale(sf,sf);
+    cairoShim.showText("av+",7);
+  }
+
+  template <> void Operation<OperationType::runningProduct>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.moveTo(-6,-7);
+    cairoShim.scale(sf,sf);
+    cairoShim.showText("∏×",7);
+  }
+
+  template <> void Operation<OperationType::difference>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.moveTo(-4,-7);
+    cairoShim.scale(sf,sf);
+    cairoShim.showText("Δ⁻",7);
+  }
+
+  template <> void Operation<OperationType::differencePlus>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.moveTo(-4,-7);
+    cairoShim.scale(sf,sf);
+    cairoShim.showText("Δ⁺",7);
+  }
+
+  template <> void Operation<OperationType::innerProduct>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.moveTo(-4,-10);
+    cairoShim.scale(sf,sf);
+    cairoShim.showText("·",14);
+  }
+
+  template <> void Operation<OperationType::outerProduct>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    constexpr const double r=6;
+    static const double d=0.5*r*std::sqrt(2);
+    cairoShim.moveTo(d,d);
+    cairoShim.lineTo(-d,-d);
+    cairoShim.moveTo(-d,d);
+    cairoShim.lineTo(d,-d);
+    cairoShim.moveTo(r,0);
+    cairoShim.arc(0,0,r,0,2*M_PI);
+    cairoShim.stroke();
+  }
+
+  template <> void Operation<OperationType::index>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-9,-10);
+    cairoShim.showText("idx",10);
+  }
+
+  template <> void Operation<OperationType::gather>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.scale(sf,sf);
+    cairoShim.moveTo(-7,-8);
+    cairoShim.showText("x[i]",8);
+    DrawBinOpShim drawBinOp(cairoShim);
+    drawBinOp.drawPort([&](){drawBinOp.drawSymbol("x");},l,-h,rotation());
+    drawBinOp.drawPort([&](){drawBinOp.drawSymbol("i");},l,h,rotation());
+  }
+
+  template <> void Operation<OperationType::meld>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.moveTo(-4,-5);
+    cairoShim.scale(sf,sf);
+    cairoShim.relLineTo(4,0);
+    cairoShim.relLineTo(2,5);
+    cairoShim.relLineTo(-2,5);
+    cairoShim.relLineTo(-4,0);
+    cairoShim.moveTo(-4,0);
+    cairoShim.relLineTo(10,0);
+    cairoShim.stroke();
+  }
+
+  template <> void Operation<OperationType::merge>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.moveTo(-4,-3);
+    cairoShim.scale(sf,sf);
+    cairoShim.relLineTo(8,0);
+    cairoShim.moveTo(-4,3);
+    cairoShim.relLineTo(8,0);
+    cairoShim.relMoveTo(0,-10);
+    cairoShim.relLineTo(0,14);
+    cairoShim.stroke();
+  }
+
+  template <> void Operation<OperationType::slice>::iconDraw(const ICairoShim& cairoShim) const
+  {
+    const double sf = scaleFactor();
+    cairoShim.moveTo(-10,-10);
+    cairoShim.scale(sf,sf);
+    TextProperties tp("[...",10);
+    cairoShim.showText(tp);
+    auto bbox=cairoShim.textExtents(tp);
+    cairoShim.moveTo(-10+bbox.width,-9);
+    cairoShim.relLineTo(0,bbox.height-2);
+    cairoShim.stroke();
+  }
+
+  template <> void Operation<OperationType::numOps>::iconDraw(const ICairoShim& cairoShim) const
   {/* needs to be here, and is actually called */}
 
-  void IntOp::pack(pack_t& x, const string& d) const
-  {::pack(x,d,*this);}
-      
-  void IntOp::unpack(unpack_t& x, const string& d)
-  {::unpack(x,d,*this);}
 
-  void DataOp::pack(pack_t& x, const string& d) const
-  {::pack(x,d,*this);}
-      
-  void DataOp::unpack(unpack_t& x, const string& d)
-  {::unpack(x,d,*this);}
 }
+

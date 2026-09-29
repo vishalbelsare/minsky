@@ -24,12 +24,16 @@
 
 #define BOOST_GEOMETRY_DISABLE_DEPRECATED_03_WARNING
 #include <boost/geometry/geometry.hpp>
-#include "cairoItems.h"
-#include "operation.h"
+
 #include "minsky.h"
+
+#include "cairoItems.h"
+#include "cairoShimCairo.h"
+#include "operation.h"
 #include "latexMarkup.h"
 #include <arrays.h>
 #include <pango.h>
+#include "ravelWrap.xcd"
 #include "minsky_epilogue.h"
 
 #include <boost/locale.hpp>
@@ -42,67 +46,76 @@ using namespace boost::geometry;
 
 namespace
 {
+  // for use when calculating bounding boxes, but not drawing to anything?
   cairo::Surface dummySurf(cairo_image_surface_create(CAIRO_FORMAT_A1, 100,100));
+  CairoShimCairo dummyCairoShim(dummySurf.cairo());
 }
 
-RenderVariable::RenderVariable(const VariableBase& var, cairo_t* cairo):
-  Pango(cairo? cairo: dummySurf.cairo()), var(var), cairo(cairo)
+RenderVariable::RenderVariable(const VariableBase& var, const ICairoShim& shim):
+  var(var), cairoShim(shim), m_context(cairoShim.context())
 {
-  setFontSize(12);
+  TextProperties textProperties;
+  textProperties.fontSize=12;
   if (var.type()==VariableType::constant)
     {
       try
         {
           auto val=var.engExp();
           if (val.engExp==-3) val.engExp=0; //0.001-1.0
-          setMarkup(var.mantissa(val)+expMultiplier(val.engExp));
+          textProperties.markup=var.mantissa(val)+expMultiplier(val.engExp);
         }
-      catch (const error&)
+      catch (const std::exception& ex)
         {
-          setMarkup("0");
+          textProperties.markup="0";
         }
-      w=0.5*Pango::width();
-      h=0.5*Pango::height();
+      auto bbox=shim.textExtents(textProperties);
+      w=0.5*bbox.width;
+      h=0.5*bbox.height;
+      hoffs=bbox.top;
     }
   else
     {
-      setMarkup(latexToPango(var.name()));
-      w=0.5*Pango::width(); 
-      h=0.5*Pango::height();
+      textProperties.markup=latexToPango(var.name());
+      auto bbox=shim.textExtents(textProperties);
+      w=0.5*bbox.width;
+      h=0.5*bbox.height;
       if (!var.ioVar())
-        { // add additional space for numerical display 
-          w+=12; 
+        { // add additional space for numerical display
+          w+=12;
           h+=4;
         }
+      hoffs=bbox.top;
     }
-  hoffs=Pango::top();
+  cachedRenderer=cairoShim.cachedRender(textProperties);
 }
 
-void RenderVariable::draw()
-{
-  var.draw(cairo);
-
-}
+RenderVariable::RenderVariable(const VariableBase& var):
+  RenderVariable(var, dummyCairoShim) {}
 
 bool RenderVariable::inImage(float x, float y)
 {
-  float dx=x-var.x(), dy=y-var.y();
-  float rx=dx*cos(var.rotation()*M_PI/180)-dy*sin(var.rotation()*M_PI/180);
-  float ry=dy*cos(var.rotation()*M_PI/180)+dx*sin(var.rotation()*M_PI/180);
+  const float z=var.zoomFactor();
+  const float dx=(x-var.x())/z, dy=(y-var.y())/z;
+  const float rx=dx*cos(var.rotation()*M_PI/180)-dy*sin(var.rotation()*M_PI/180);
+  const float ry=dy*cos(var.rotation()*M_PI/180)+dx*sin(var.rotation()*M_PI/180);
   return rx>=-w && rx<=w && ry>=-h && ry <= h;
 }
 
 double RenderVariable::handlePos() const
 {
-  if (var.sliderStep<std::numeric_limits<double>::min() || std::isnan(var.sliderStep)) var.initSliderBounds();   // this should only be used when sliderStep's value has not been set or is a nonsensicl
-  var.adjustSliderBounds();
-  return (w<0.5*var.iWidth()? 0.5*var.iWidth() : w)*(var.value()-0.5*(var.sliderMin+var.sliderMax))/(var.sliderMax-var.sliderMin);
+  if (auto vv=var.vValue())
+    {
+      vv->adjustSliderBounds();
+      assert(vv->sliderMin<vv->sliderMax);
+      return (w<0.5*var.iWidth()? 0.5*var.iWidth() : w)*(vv->value()-0.5*(vv->sliderMin+vv->sliderMax))/(vv->sliderMax-vv->sliderMin);
+    }
+  return 0;
 }
 
 void minsky::drawTriangle
 (cairo_t* cairo, double x, double y, const cairo::Colour& col, double angle)
 {
-  CairoSave cs(cairo);
+  const CairoSave cs(cairo);
   cairo_new_path(cairo);
   cairo_set_source_rgba(cairo,col.r,col.g,col.b,col.a);
   cairo_translate(cairo,x,y);
@@ -111,5 +124,20 @@ void minsky::drawTriangle
   cairo_line_to(cairo,0,-3);
   cairo_line_to(cairo,0,3);
   cairo_fill(cairo);
+}
+
+void minsky::drawTriangle
+(const ICairoShim& cairoShim, double x, double y, const cairo::Colour& col, double angle)
+{
+  cairoShim.save();
+  cairoShim.newPath();
+  cairoShim.setSourceRGBA(col.r,col.g,col.b,col.a);
+  cairoShim.translate(x,y);
+  cairoShim.rotate(angle);
+  cairoShim.moveTo(10,0);
+  cairoShim.lineTo(0,-3);
+  cairoShim.lineTo(0,3);
+  cairoShim.fill();
+  cairoShim.restore();
 }
 

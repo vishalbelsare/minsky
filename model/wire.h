@@ -21,11 +21,10 @@
 
 #include "noteBase.h"
 #include "intrusiveMap.h"
+#include "ICairoShim.h"
 
 #include <error.h>
 #include <arrays.h>
-#include <TCL_obj_base.h>
-#include <accessor.h>
 #include "classdesc_access.h"
 #include <cairo.h>
 
@@ -38,9 +37,7 @@ namespace minsky
   struct Units;
   using ecolab::error;
   
-  struct WireAccessor: public ecolab::TCLAccessor<Wire, std::vector<float>> {WireAccessor();};
-  
-  class Wire: public NoteBase, public WireAccessor
+  class Wire: public NoteBase
   {
     CLASSDESC_ACCESS(Wire);
     friend struct SchemaHelper;
@@ -53,12 +50,13 @@ namespace minsky
     constexpr static float handleRadius=3;
     mutable int unitsCtr=0; ///< for detecting wiring loops in units()
     mutable std::vector<std::pair<float,float>> cairoCoords; ///< contains all the internal cairo coordinates used to draw a wire
+    void draw(cairo_t* cairo, bool reverseArrow=false) const;
   public:
 
     Wire() {}
     Wire(const std::weak_ptr<Port>& from, const std::weak_ptr<Port>& to, 
          const std::vector<float>& a_coords=std::vector<float>()); 
-   ~Wire();
+    virtual ~Wire();
 
     std::shared_ptr<Port> from() const {return m_from.lock();}
     std::shared_ptr<Port> to() const {return m_to.lock();}
@@ -68,13 +66,8 @@ namespace minsky
     /// stash all the internal cairo coordinates along a wire 
     void storeCairoCoords(cairo_t* cairo) const;
     
-    bool attachedToDefiningVar(std::set<const Item*>& visited) const;         
-    bool attachedToDefiningVar() const {
-      std::set<const Item*> visited;
-      return attachedToDefiningVar(visited);
-    }
     /// draw this item into a cairo context
-    void draw(cairo_t* cairo) const;
+    virtual void draw(const ICairoShim& cairoShim, bool reverseArrow=false) const;
     
     /// display coordinates 
     std::vector<float> coords() const;

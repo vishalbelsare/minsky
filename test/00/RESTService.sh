@@ -1,43 +1,15 @@
 #! /bin/sh
 
 here=`pwd`
-if test $? -ne 0; then exit 2; fi
-tmp=/tmp/$$
-mkdir $tmp
-if test $? -ne 0; then exit 2; fi
-cd $tmp
-if test $? -ne 0; then exit 2; fi
+. $here/test/common-test.sh
 
-fail()
-{
-    echo "FAILED" 1>&2
-    cd $here
-    chmod -R u+w $tmp
-    rm -rf $tmp
-    exit 1
-}
-
-pass()
-{
-    echo "PASSED" 1>&2
-    cd $here
-    chmod -R u+w $tmp
-    rm -rf $tmp
-    exit 0
-}
-
-trap "fail" 1 2 3 15
-
-$here/RESTService/RESTService >output <<EOF
-/minsky/variableValues/@elem/constant:one
-
+$here/RESTService/minsky-RESTService -batch >output <<EOF
+/minsky/variableValues/@elem/"constant:one"
 EOF
 if [ $? -ne 0 ]; then fail; fi
 
 cat >reference <<EOF
-cmd>/minsky/variableValues/@elem/constant:one
-{"first":"constant:one","second":{"godleyOverridden":false,"init":"1","name":"constant:one","tensorInit":{"data":[],"dims":[]},"units":[],"unitsCached":false,"xVector":[]}}
-cmd>
+/minsky/variableValues/@elem/"constant:one"=>{"detailedText":"","enableSlider":true,"godleyOverridden":false,"name":"constant:one","rhs":{},"sliderMax":-1.7976931348623157e+308,"sliderMin":1.7976931348623157e+308,"sliderStep":0,"sliderStepRel":false,"spec":{"counter":false,"dataColOffset":0,"dataCols":[],"dataRowOffset":0,"decSeparator":".","dimensionCols":[],"dimensionNames":[],"dimensions":[],"dontFail":false,"duplicateKeyAction":"throwException","escape":"\u0000","headerRow":0,"horizontalDimName":"?","horizontalDimension":{"type":"string","units":""},"maxColumn":1000,"mergeDelimiters":false,"missingValue":NaN,"numCols":0,"quote":"\"","separator":","},"tensorInit":{},"tooltip":"","units":[],"unitsCached":false,"url":""}
 EOF
 
 diff -q -w output reference

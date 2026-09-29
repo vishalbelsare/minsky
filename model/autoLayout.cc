@@ -17,9 +17,12 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "cairoItems.h"
 #include "autoLayout.h"
 #include "selection.h"
+#include "lasso.h"
 #include "userFunction.h"
+#include "minsky.h"
 #include "minsky_epilogue.h"
 
 #include <map>
@@ -38,7 +41,6 @@ namespace minsky
 {
   namespace
   {
-    inline double sqr(double x) {return x*x;}
     using Graph=boost::directed_graph<Item*>;
 
     // computes minimum distance two items can approach each other
@@ -76,16 +78,16 @@ namespace minsky
     {
       double area=0;
       for (auto& i: g.items)
-        area+=i->width()*i->height();
+        area+=double(i->width())*i->height();
       for (auto& i: g.groups)
-        area+=i->width()*i->height();
+        area+=double(i->width())*i->height();
       return area;
     }
   }
   
   void randomizeLayout(Group& g)
   {
-    double layoutSize=sqrt(3*totalArea(g));
+    const double layoutSize=sqrt(3*totalArea(g));
     default_random_engine gen;
     uniform_real_distribution<double> rng(0,1);
     for (auto& i: g.items)
@@ -99,7 +101,7 @@ namespace minsky
   void layoutGroup(Group& g)
   {
     if (g.items.size()+g.groups.size()<2) return;
-    double layoutSize=sqrt(10*totalArea(g)); //half width of square to emplace the items
+    const double layoutSize=sqrt(10*totalArea(g)); //half width of square to emplace the items
    
     Graph gg;
     map<Item*, decltype(gg.add_vertex())> vertexMap;
@@ -157,7 +159,7 @@ namespace minsky
     
     using PosMap=std::map<decltype(gg.add_vertex()), Topology::point_type>;
     PosMap positions;
-    boost::associative_property_map<PosMap> pm(positions);
+    const boost::associative_property_map<PosMap> pm(positions);
 
     for (auto& i: vertexMap)
       {
@@ -167,8 +169,12 @@ namespace minsky
         positions[i.second]=p;
       }
 
+    double temp=10;
+    // use the cooling schedule to drive the progress bar
+    ProgressUpdater pu(minsky().progressState, "Autolaying out...", 100);
     fruchterman_reingold_force_directed_layout
-      (gg,pm, Topology(layoutSize), attractive_force(WireForce()).repulsive_force(RepulsiveForce()));
+      (gg,pm, Topology(layoutSize), attractive_force(WireForce()).repulsive_force(RepulsiveForce()).
+       cooling([&temp,&pu](){pu.setProgress(0.1*(10-temp)); return std::max(0., temp-=0.1);}));
     // maybe not needed
     //.force_pairs(boost::all_force_pairs())
     

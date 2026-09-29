@@ -17,14 +17,19 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "minsky.h"
 #include "cairoItems.h"
 #include "group.h"
 #include "wire.h"
 #include "operation.h"
-#include "minsky.h"
 #include "autoLayout.h"
 #include "equations.h"
 #include <cairo_base.h>
+#include "../engine/cairoShimCairo.h"
+#include "group.rcd"
+#include "itemT.rcd"
+#include "bookmark.rcd"
+#include "progress.h"
 #include "minsky_epilogue.h"
 using namespace std;
 using namespace ecolab::cairo;
@@ -36,6 +41,13 @@ namespace minsky
 {
   SVGRenderer Group::svgRenderer;
 
+  namespace
+  {
+    // return true if scope g refers to the global model group
+    bool isGlobal(const GroupPtr& g)
+    {return !g || g==cminsky().model;}
+  }
+  
   double Group::operator()(const std::vector<double>& p) 
   {
     if (outVariables.empty()) return nan("");
@@ -44,9 +56,9 @@ namespace minsky
     EvalOpVector equations;
     vector<Integral> integrals;
     system.populateEvalOpVector(equations, integrals);
-    vector<double> flow(ValueVector::flowVars);
+    auto flow(ValueVector::flowVars);
 
-        // assign values to unattached input variables
+    // assign values to unattached input variables
     auto iVar=inVariables.begin();
     for (auto v: p)
       {
@@ -56,7 +68,7 @@ namespace minsky
       }
 
     for (auto& i: equations)
-      i->eval(&flow[0], flow.size(),ValueVector::stockVars.data());
+      i->eval(flow.data(), flow.size(),ValueVector::stockVars.data());
     return flow[outVariables[0]->vValue()->idx()];
   }
 
@@ -129,11 +141,13 @@ namespace minsky
     // a map of original to cloned items (weak references)
     map<Item*,ItemPtr> cloneMap;
     map<IntOp*,bool> integrals;
-    for (auto& i: items)
+    // cloning IntOps mutates items, as intVars get inserted and removed
+    auto itemsCopy=items;
+    for (auto& i: itemsCopy)
       if (auto integ=dynamic_cast<IntOp*>(i.get()))
         integrals.emplace(integ, integ->coupled());
-    for (auto& i: items)
-      cloneMap[i.get()]=r->addItem(i->clone());
+    for (auto& i: itemsCopy)
+      cloneMap[i.get()]=r->addItem(i->clone(),true);
     for (auto& i: groups)
       cloneMap[i.get()]=r->addGroup(i->copyUnowned());
     for (auto& w: wires) 
@@ -175,8 +189,31 @@ namespace minsky
     return r;
   }
 
-  ItemPtr Group::removeItem(const Item& it)
+  void Group::makeSubroutine()
   {
+    recursiveDo(&GroupItems::items, [this](Items&,Items::iterator i)
+    {
+      if (auto v=(*i)->variableCast())
+        if (v->rawName()[0]==':')
+          {
+            // walk up parent groups to see if this variable is mentioned
+            for (auto g=group.lock(); g; g=g->group.lock())
+              for (auto& item: g->items)
+                if (auto vi=item->variableCast())
+                  if (vi->valueId()==v->valueId())
+                    goto outer_scope_variable_found;
+            v->name(v->rawName().substr(1)); // make variable local
+          }
+    outer_scope_variable_found:
+      return false;
+    });
+  }
+
+  
+  ItemPtr GroupItems::removeItem(const Item& it)
+  {
+    if (it.plotWidgetCast()==displayPlot.get()) removeDisplayPlot();
+    if (!inDestructor) bookmarks.erase(it.bookmarkId());
     for (auto i=items.begin(); i!=items.end(); ++i)
       if (i->get()==&it)
         {
@@ -201,7 +238,6 @@ namespace minsky
           return r;
         }
     
-    removeDisplayPlot();
     
     for (auto& g: groups)
       if (ItemPtr r=g->removeItem(it))
@@ -216,6 +252,7 @@ namespace minsky
         r->deleteAttachedWires();
         r->removeControlledItems();
         minsky().runItemDeletedCallback(*r);
+        minsky().bookmarkRefresh();
       }
   }
 
@@ -264,15 +301,43 @@ namespace minsky
     return findAny(&Group::items, [&](const ItemPtr& x){return x.get()==&it;});
   }
 
+  void GroupItems::renameVar(const GroupPtr& origGroup, VariableBase& v)
+  {
+    if (auto thisGroup=self.lock())
+      {
+        if (origGroup->higher(*thisGroup))
+          {
+            // moving local var into an inner group, make global
+            if (v.rawName()[0]!=':')
+              v.name(':'+v.rawName());
+          }
+        else if (thisGroup->higher(*origGroup))
+          {
+            // moving global var into an outer group, link up with variable of same name (if existing)
+            if (v.name()[0]==':')
+              for (auto& i: items)
+                if (auto vv=i->variableCast())
+                  if (vv->name()==v.name().substr(1))
+                    v.name(v.name().substr(1));
+          }
+        else
+          // moving between unrelated groups
+          if (v.name()[0]==':' && valueId(thisGroup,v.name()) != valueId(origGroup,v.name()))
+            // maintain linkage if possible, otherwise make local
+            v.name(v.name().substr(1));
+      }
+  }
 
+  
   ItemPtr GroupItems::addItem(const shared_ptr<Item>& it, bool inSchema)
   {
     if (!it) return it;
+    minsky().bookmarkRefresh();
     if (auto x=dynamic_pointer_cast<Group>(it))
       return addGroup(x);
    
     // stash position
-    float x=it->x(), y=it->y();
+    const float x=it->x(), y=it->y();
     auto origGroup=it->group.lock();
 
     if (origGroup.get()==this) return it; // nothing to do.
@@ -295,36 +360,10 @@ namespace minsky
     if (auto v=it->variableCast())
       {
         if (!inSchema && origGroup)
-          if (auto destGroup=self.lock())
-            {
-              if (origGroup->higher(*destGroup))
-                {
-                  // moving local var into an inner group, check if other variables of
-                  // same name exist in old group, and retain linkage
-                  if (v->name()[0]!=':')
-                    for (auto& i: origGroup->items)
-                      if (auto vv=i->variableCast())
-                        if (vv->name()==v->name())
-                          v->name(':'+v->name());
-                }
-              else if (destGroup->higher(*origGroup))
-                {
-                  // moving global var into an outer group, link up with variable of same name (if existing)
-                  if (v->name()[0]==':')
-                    for (auto& i: items)
-                      if (auto vv=i->variableCast())
-                        if (vv->name()==v->name().substr(1))
-                          v->name(v->name().substr(1));
-                }
-              else
-                // moving between unrelated groups
-                if (v->name()[0]==':' && VariableValue::valueId(destGroup,v->name()) !=
-                    VariableValue::valueId(origGroup,v->name()))
-                  // maintain linkage if possible, otherwise make local
-                  v->name(v->name().substr(1));
-            }
+          renameVar(origGroup, *v);
         v->init(init); //NB calls ensureValueExists()
-        v->setUnits(units);
+        // if value didn't exist before, units will be empty. Do not overwrite any previous units set. For #1461.
+        if (units.length()) v->setUnits(units);
       }
      
     // move wire to highest common group
@@ -343,11 +382,14 @@ namespace minsky
     if (auto intOp=dynamic_cast<IntOp*>(it.get()))
       if (intOp->intVar)
         {
+          if (!inSchema && origGroup)
+            renameVar(origGroup, *intOp->intVar);
           if (auto oldG=intOp->intVar->group.lock())
-            {
-              if (oldG.get()!=this)
-                addItem(oldG->removeItem(*intOp->intVar),inSchema);
-            }
+           {
+                 
+             if (oldG.get()!=this)
+               addItem(oldG->removeItem(*intOp->intVar),inSchema);
+           }
           else
             addItem(intOp->intVar,inSchema);
           if (intOp->coupled())
@@ -475,10 +517,10 @@ namespace minsky
        }
   }
 
-  VariablePtr Group::addIOVar()
+  VariablePtr Group::addIOVar(const char* prefix)
   {
-    VariablePtr v(VariableType::flow,
-                  VariableValue::uqName(cminsky().variableValues.newName(to_string(size_t(this))+":")));
+    const VariablePtr v(VariableType::flow,
+                  uqName(cminsky().variableValues.newName(to_string(size_t(this))+":"+prefix)));
     addItem(v,true);
     createdIOvariables.push_back(v);
     v->rotation(rotation());
@@ -489,18 +531,19 @@ namespace minsky
   
   Group::IORegion::type Group::inIORegion(float x, float y) const
   {
-    float left, right, z=zoomFactor();
+    float left, right;
+    const float z=zoomFactor();
     margins(left,right);    
-    float dx=(x-this->x())*cos(rotation()*M_PI/180)-
+    const float dx=(x-this->x())*cos(rotation()*M_PI/180)-
       (y-this->y())*sin(rotation()*M_PI/180);
-    float dy=(x-this->x())*sin(rotation()*M_PI/180)+
+    const float dy=(x-this->x())*sin(rotation()*M_PI/180)+
       (y-this->y())*cos(rotation()*M_PI/180);      
-    float w=0.5*iWidth()*z,h=0.5*iHeight()*z;
+    const float w=0.5*iWidth()*z,h=0.5*iHeight()*z;
     if (w-right<dx)
       return IORegion::output;
     if (-w+left>dx)
       return IORegion::input;
-    if ((-h-topMargin*z<dy && dy<0) || (h+topMargin*z>dy && dy>0))     
+    if ((-h+topMargin*z>dy && dy<0) || (h-topMargin*z<dy && dy>0))     
       return IORegion::topBottom;  
     return IORegion::none;
   }
@@ -533,12 +576,12 @@ namespace minsky
   {
     double x0, x1, y0, y1;
     contentBounds(x0,y0,x1,y1);
-    double xx=0.5*(x0+x1), yy=0.5*(y0+y1);
-    double dx=xx-x(), dy=yy-y();
+    const double xx=0.5*(x0+x1), yy=0.5*(y0+y1);
+    const double dx=xx-x(), dy=yy-y();
     float l,r; margins(l,r);    
-    float z=zoomFactor();
-    iWidth(((x1-x0)+l+r)/z);
-    iHeight(((y1-y0)+20*z)/z);
+    const float z=zoomFactor();
+    m_width=((x1-x0)+l+r)/z;
+    m_height=((y1-y0)+20*z)/z;
 
     // adjust contents by the offset
     for (auto& i: items)
@@ -560,23 +603,11 @@ namespace minsky
           {
             i->m_x*=sx;
             i->m_y*=sy;
-            //i->zoomFactor*=std::max(sx,sy);
           }
     }
 
     
-    template <class T>
-    void accumulateCentres(const T& items, float& xc, float& yc, size_t& n)
-    {
-      for (auto& i: items)
-        if (!i->ioVar())
-          {
-            xc+=i->m_x;
-            yc+=i->m_y;
-            n++;
-          }
-    }
-
+    
     template <class T>
     void recentreItems(const T& items, float xc, float yc)
     {
@@ -600,27 +631,17 @@ namespace minsky
     if (fabs(b.x0-b.x1) < l+r || fabs(b.y0-b.y1)<2*z*topMargin) return;
     iWidth(fabs(b.x0-b.x1)/z);
     iHeight((fabs(b.y0-b.y1)-2*topMargin)/z);
+    // TODO - it is wasteful to call contentBounds within computeRelZoom, then again a few lines later
     computeRelZoom(); // needed to ensure grouped items scale properly with resize operation. for ticket 1243    
-
-    // rescale contents to fit
-    // firstly, recentre the centroid
-    float xc=0, yc=0;
-    size_t n=0;
-    accumulateCentres(items,xc,yc,n);
-    accumulateCentres(groups,xc,yc,n);
-    if (n>0)
-      {
-        xc/=n; yc/=n;
-        recentreItems(items,xc,yc);
-        recentreItems(groups,xc,yc);
-        
-        z=zoomFactor();     // recalculate zoomFactor because relZoom changed above. for ticket 1243
-        double x0, x1, y0, y1;
-        contentBounds(x0,y0,x1,y1);
-        double sx=(fabs(b.x0-b.x1)-z*(l+r))/(x1-x0), sy=(fabs(b.y0-b.y1)-2*z*topMargin)/(y1-y0);    
-        resizeItems(items,sx,sy);
-        resizeItems(groups,sx,sy);
-      }
+    z=zoomFactor();     // recalculate zoomFactor because relZoom changed above. for ticket 1243
+    double x0, x1, y0, y1;
+    contentBounds(x0,y0,x1,y1);
+    recentreItems(items,0.5*(x0+x1)-x(),0.5*(y0+y1)-y());
+    recentreItems(groups,0.5*(x0+x1)-x(),0.5*(y0+y1)-y());
+    double sx=(fabs(b.x0-b.x1)-z*(l+r))/(x1-x0), sy=(fabs(b.y0-b.y1)-2*z*topMargin)/(y1-y0);
+    sx=std::min(sx,sy);
+    resizeItems(items,sx,sx);
+    resizeItems(groups,sx,sx);
     
     moveTo(0.5*(b.x0+b.x1), 0.5*(b.y0+b.y1));
     bb.update(*this);
@@ -738,7 +759,7 @@ namespace minsky
 
   float Group::contentBounds(double& x0, double& y0, double& x1, double& y1) const
   {
-    float localZoom=1;
+    const float localZoom=1;
     x0=numeric_limits<float>::max();
     x1=-numeric_limits<float>::max();
     y0=numeric_limits<float>::max();
@@ -754,16 +775,25 @@ namespace minsky
         }  		
 			  
     for (auto& i: groups)
-      {
-        if (i->left()<x0) x0=i->left();
-        if (i->right()>x1) x1=i->right();
-        if (i->top()<y0) y0=i->top();
-        if (i->bottom()>y1) y1=i->bottom();
-      }
+      if (i->displayContents())
+        {
+          double left, top, right, bottom;
+          i->contentBounds(left,top,right,bottom);
+          if (left<x0) x0=left;
+          if (right>x1) x1=right;
+          if (top<y0) y0=top;
+          if (bottom>y1) y1=bottom;
+        }
+      else
+        {
+          if (i->left()<x0) x0=i->left();
+          if (i->right()>x1) x1=i->right();
+          if (i->top()<y0) y0=i->top();
+          if (i->bottom()>y1) y1=i->bottom();
+        }
    
     // if there are no contents, result is not finite. In this case,
     // set the content bounds to a 10x10 sized box around the centroid of the I/O variables.
-
     if (x0==numeric_limits<float>::max())
       {
         float cx=0, cy=0;
@@ -777,7 +807,7 @@ namespace minsky
             cx+=i->x();
             cy+=i->y();
           }
-        int n=inVariables.size()+outVariables.size();
+        const int n=inVariables.size()+outVariables.size();
         if (n>0)
           {
             cx/=n;
@@ -795,10 +825,8 @@ namespace minsky
   float Group::computeDisplayZoom()
   {
     double x0, x1, y0, y1;
-    //float l, r, t, bm;
-    float z=zoomFactor();    
-    float l, r;    
-    float lz=contentBounds(x0,y0,x1,y1);
+    const float z=zoomFactor();    
+    const float lz=contentBounds(x0,y0,x1,y1);
     x0=min(x0,double(x()));
     x1=max(x1,double(x()));
     y0=min(y0,double(y()));
@@ -807,7 +835,8 @@ namespace minsky
     displayZoom = 2*max( max(x1-x(), x()-x0)/(iWidth()*z), max(y1-y(), y()-y0)/(iHeight()*z));
 
     // account for shrinking margins
-    float readjust=zoomFactor()/edgeScale() / (displayZoom>1? displayZoom:1);
+    const float readjust=zoomFactor()/edgeScale() / (displayZoom>1? displayZoom:1);
+    float l, r;    
     margins(l,r);
     l*=readjust; r*=readjust;    
     displayZoom = max(displayZoom, 
@@ -822,19 +851,20 @@ namespace minsky
 
   void Group::computeRelZoom()
   {
-    double x0, x1, y0, y1, z=zoomFactor();
+    double x0, x1, y0, y1;
+    const double z=zoomFactor();
     relZoom=1;
     contentBounds(x0,y0,x1,y1);
     float l, r;
     margins(l,r);    
-    double dx=x1-x0, dy=y1-y0;
+    const double dx=x1-x0, dy=y1-y0;
     if (width()-l-r>0 && dx>0 && dy>0)
       relZoom=std::min(1.0, std::min((width()-l-r)/(dx), (height()-20*z)/(dy))); 
   }
   
   const Group* Group::minimalEnclosingGroup(float x0, float y0, float x1, float y1, const Item* ignore) const
   {
-    float z=zoomFactor();
+    const float z=zoomFactor();
     if (x0<x()-0.5*z*iWidth() || x1>x()+0.5*z*iWidth() ||
         y0<y()-0.5*z*iHeight() || y1>y()+0.5*z*iHeight())
       return nullptr;
@@ -848,15 +878,12 @@ namespace minsky
 
   void Group::setZoom(float factor)
   {
-    bool dpc=displayContents();
-    //    zoomFactor=factor;
+    const bool dpc=displayContents();
     if (!group.lock())
       relZoom=factor;
     else
       computeRelZoom();
-    float lzoom=localZoom();
-//    for (auto& i: items)
-//      i->zoomFactor=lzoom;
+    const float lzoom=localZoom();
     m_displayContentsChanged = dpc!=displayContents();
     for (auto& i: groups)
       {
@@ -867,7 +894,7 @@ namespace minsky
 
   void Group::zoom(float xOrigin, float yOrigin,float factor)
   {
-    bool dpc=displayContents();
+    const bool dpc=displayContents();
     minsky::zoom(m_x,xOrigin+m_x-x(),factor);
     minsky::zoom(m_y,yOrigin+m_y-y(),factor);
     m_displayContentsChanged = dpc!=displayContents();
@@ -881,152 +908,168 @@ namespace minsky
       }
   }
 
-  ClickType::Type Group::clickType(float x, float y)
+  ClickType::Type Group::clickType(float x, float y) const
   {
     auto z=zoomFactor();
-    double w=0.5*iWidth()*z, h=0.5*iHeight()*z;
-    if (onResizeHandle(x,y)) return ClickType::onResize;         
-    if (displayContents() && inIORegion(x,y)==IORegion::none)
-      return ClickType::outside;
+    const double w=0.5*iWidth()*z, h=0.5*iHeight()*z;
+    if (onResizeHandle(x,y)) return ClickType::onResize;
+    // Check edge I/O variables BEFORE the inIORegion early exit.
+    // When a group is zoomed (displayContents()==true), edge variables may
+    // lie outside the I/O region strip. Without this ordering, clicking on
+    // them returns ClickType::outside and the canvas falls back to dragging
+    // the whole group instead of initiating wire dragging. Fixes issue #610.
     if (auto item=select(x,y))
       return item->clickType(x,y);
-    if ((abs(x-this->x())<w && abs(y-this->y())<h) || inIORegion(x,y)==IORegion::topBottom) // check also if (x,y) is within top and bottom margins of group. for feature 88
+    if (displayContents() && inIORegion(x,y)==IORegion::none)
+      return ClickType::outside;
+    if ((abs(x-this->x())<w && abs(y-this->y())<h+topMargin*z)) // check also if (x,y) is within top and bottom margins of group. for feature 88
       return ClickType::onItem;
     return ClickType::outside;
   }
 
-  void Group::draw(cairo_t* cairo) const
+  void Group::draw(const ICairoShim& cairoShim) const
   {
-    double angle=rotation() * M_PI / 180.0;
+    auto [angle,flipped]=rotationAsRadians();
 
     // determine how big the group icon should be to allow
     // sufficient space around the side for the edge variables
     float leftMargin, rightMargin;
     margins(leftMargin, rightMargin);    
-    float z=zoomFactor();
+    const float z=zoomFactor();
 
-    unsigned width=z*this->iWidth(), height=z*this->iHeight();
+    const unsigned width=z*this->iWidth(), height=z*this->iHeight();
+    cairoShim.save();
+    cairoShim.rotate(angle);
+
     // In docker environments, something invisible gets drawn outside
     // the horizontal dimensions, stuffing up the bb.width()
     // calculation, and then causing the groupResize test to
     // fail. This extra clip path fixes the problem.
-    cairo_rectangle(cairo,-0.5*width,-0.5*height-topMargin*z, width, height+2*topMargin*z);
-    cairo_clip(cairo);
+    cairoShim.rectangle(-0.5*width,-0.5*height-topMargin*z, width, height+2*topMargin*z);
+    cairoShim.clip();
 
     // draw default group icon
-    cairo::CairoSave cs(cairo);
-    cairo_rotate(cairo,angle);
 
     // display I/O region in grey
+    // drawIORegion needs cairo_t* for now
+    auto& shimImpl = dynamic_cast<const CairoShimCairo&>(cairoShim);
+    cairo_t* cairo = shimImpl._internalGetCairoContext();
     drawIORegion(cairo);
 
     {
-      cairo::CairoSave cs(cairo);
-      cairo_translate(cairo, -0.5*width+leftMargin, -0.5*height);
+      cairoShim.save();
+      cairoShim.translate(-0.5*width+leftMargin, -0.5*height);
 
               
-      double scalex=double(width-leftMargin-rightMargin)/width;
-      cairo_scale(cairo, scalex, 1);
+      const double scalex=double(width-leftMargin-rightMargin)/width;
+      cairoShim.scale(scalex, 1);
       
       // draw a simple frame 
-      cairo_rectangle(cairo,0,0,width,height);
+      cairoShim.rectangle(0,0,width,height);
       {
-        cairo::CairoSave cs(cairo);
-        cairo_identity_matrix(cairo);
-        cairo_set_line_width(cairo,1);
-        cairo_stroke(cairo);
+        cairoShim.save();
+        cairoShim.identityMatrix();
+        cairoShim.setLineWidth(1);
+        cairoShim.stroke();
+        cairoShim.restore();
       }
 
       if (!displayContents())
         {
           if (displayPlot)
             {
+              cairoShim.save();
+              if (flipped)
+                {
+                  cairoShim.translate(width,height);
+                  cairoShim.rotate(M_PI);  // rotate plot to keep it right way up.
+                }
+              // propagate plot type to underling ecolab::Plot
+              auto& pt=const_cast<Plot*>(static_cast<const Plot*>(displayPlot.get()))->plotType;
+              switch (displayPlot->plotType)
+                {
+                case PlotWidget::line: pt=Plot::line; break;
+                case PlotWidget::bar:  pt=Plot::bar;  break;
+                default: break;
+                }
+              // Plot::draw needs cairo_t*
               displayPlot->Plot::draw(cairo, width, height);
+              cairoShim.restore();
             }
           else
             {
-              cairo_scale(cairo,width/svgRenderer.width(),height/svgRenderer.height());
-              cairo_rectangle(cairo,0, 0,svgRenderer.width(), svgRenderer.height());
-              cairo_clip(cairo);
-              svgRenderer.render(cairo);
+              cairoShim.rectangle(0, 0,width, height);
+              cairoShim.clip();
+              // Render SVG using ICairoShim abstraction
+              cairoShim.renderSVG(svgRenderer, width, height);
             }
         }
+      cairoShim.restore();
     }
 
+    // drawEdgeVariables needs cairo_t* for now
     drawEdgeVariables(cairo);
 
 
     // display text label
     if (!title.empty())
       {
-        cairo::CairoSave cs(cairo);
-        cairo_scale(cairo, z, z);
-        cairo_select_font_face
-          (cairo, "sans-serif", CAIRO_FONT_SLANT_ITALIC, 
-           CAIRO_FONT_WEIGHT_NORMAL);
-        cairo_set_font_size(cairo,12);
+        cairoShim.save();
+        cairoShim.scale(z, z);
+        TextProperties tp;
+        tp.fontSize=12;
               
         // extract the bounding box of the text
-        cairo_text_extents_t bbox;
-        cairo_text_extents(cairo,title.c_str(),&bbox);       
-        double w=0.5*bbox.width+2; 
-        double h=0.5*bbox.height+5;
-        double fm=std::fmod(rotation(),360);
+        tp.markup=title;
+        auto bbox=cairoShim.textExtents(tp);
+        const double w=0.5*bbox.width+2; 
+        const double h=0.5*bbox.height+5;
 
         // if rotation is in 1st or 3rd quadrant, rotate as
         // normal, otherwise flip the text so it reads L->R
-        if (abs(fm)>90 && abs(fm)<270)
-          cairo_rotate(cairo, M_PI);
+        if (flipped)
+          cairoShim.rotate(M_PI);
 
         // prepare a background for the text, partially obscuring graphic
-        double transparency=displayContents()? 0.25: 1;
+        const double transparency=displayContents()? 0.25: 1;
 
         // display text
-        cairo_move_to(cairo, -w+1, h-12-0.5*(height)/z);
-        cairo_set_source_rgba(cairo,0,0,0,transparency);
-        cairo_show_text(cairo,title.c_str());
+        cairoShim.moveTo(-w+1, h-12-0.5*(height)/z);
+        cairoShim.setSourceRGBA(0,0,0,transparency);
+        cairoShim.showText(tp);
+        cairoShim.restore();
       }
 
     if (mouseFocus)
       {
-        displayTooltip(cairo,tooltip);
+        displayTooltip(cairoShim,tooltip());
         // Resize handles always visible on mousefocus. For ticket 92.
-        drawResizeHandles(cairo);
+        drawResizeHandles(cairoShim);
       }
 
-    cairo_rectangle(cairo,-0.5*width,-0.5*height,width,height);
-    cairo_clip(cairo);
+    cairoShim.rectangle(-0.5*width,-0.5*height,width,height);
+    cairoShim.clip();
     if (selected)
-      drawSelected(cairo);
+      drawSelected(cairoShim);
     
+    cairoShim.restore();
   }
 
-  namespace
-  {
-    // ratio of variable size to text height
-    const float varToTextRatio=1.8;
-  }
-  
-  void Group::draw1edge(const vector<VariablePtr>& vars, cairo_t* cairo, 
-                        float x) const
+  // Helper to compute edge variable layout (world-space positions) radially
+  static void layoutEdgeVariables(const vector<VariablePtr>& vars, float xEdge,
+                                  const Item* groupItem, double groupRotation)
   {
     float top=0, bottom=0;
-    double angle=rotation() * M_PI / 180.0;
     for (size_t i=0; i<vars.size(); ++i)
       {
-        Rotate r(rotation(),0,0);
+        const Rotate r(groupRotation,0,0);
         auto& v=vars[i];
-        float y=0;
+        float yOff=0;
         auto z=v->zoomFactor();
         auto t=v->bb.top()*z, b=v->bb.bottom()*z;
-        if (i>0) y = i%2? top-b: bottom-t;
-        v->moveTo(r.x(x,y)+this->x(), r.y(x,y)+this->y());
-        cairo::CairoSave cs(cairo);
-        cairo_translate(cairo,x,y);
-        // cairo context is already rotated, so antirotate
-        cairo_rotate(cairo,-angle);
-        v->rotation(rotation()); 
-        v->draw(cairo);
+        if (i>0) yOff = i%2? top-b: bottom-t;
+        v->moveTo(r.x(xEdge,yOff)+groupItem->x(), r.y(xEdge,yOff)+groupItem->y());
+        v->rotation(groupRotation);
         if (i==0)
           {
             bottom=b;
@@ -1039,11 +1082,49 @@ namespace minsky
       }
   }
 
+  void Group::draw1edge(const vector<VariablePtr>& vars, cairo_t* cairo, 
+                        float xEdge) const
+  {
+    layoutEdgeVariables(vars, xEdge, this, rotation());
+
+    // Iterate again solely to perform drawing steps.
+    const double angle=rotation() * M_PI / 180.0;
+    float top=0, bottom=0;
+    for (size_t i=0; i<vars.size(); ++i)
+      {
+        auto& v=vars[i];
+        
+        float yOff = 0;
+        auto z = v->zoomFactor();
+        auto t = v->bb.top() * z, b = v->bb.bottom() * z;
+        if (i > 0) yOff = i % 2 ? top - b : bottom - t;
+        
+        const cairo::CairoSave cs(cairo);
+        cairo_translate(cairo,xEdge,yOff);
+        // cairo context is already rotated, so antirotate
+        cairo_rotate(cairo,-angle);
+        {
+          CairoShimCairo shim(cairo);
+          v->draw(shim);
+        }
+
+        if (i == 0)
+          {
+            bottom = b;
+            top = t;
+          }
+        else if (i % 2)
+          top -= v->height();
+        else
+          bottom += v->height();
+      }
+  }
+
   void Group::drawEdgeVariables(cairo_t* cairo) const
   {
     float left, right; margins(left,right);    
-    cairo::CairoSave cs(cairo);
-    float z=zoomFactor();
+    const cairo::CairoSave cs(cairo);
+    const float z=zoomFactor();
     draw1edge(inVariables, cairo, -0.5*(iWidth()*z-left));
     draw1edge(outVariables, cairo, 0.5*(iWidth()*z-right));
   }
@@ -1054,9 +1135,8 @@ namespace minsky
     float notchY(const vector<VariablePtr>& vars)
     {
       if (vars.empty()) return 0;
-      float z=vars[0]->zoomFactor();
+      const float z=vars[0]->zoomFactor();
       float top=vars[0]->bb.top()*z, bottom=vars[0]->bb.top()*z;
-      float y=0;
       for (size_t i=0; i<vars.size(); ++i)
           {
             if (i%2)
@@ -1071,12 +1151,13 @@ namespace minsky
   // draw notches in the I/O region to indicate docking capability
   void Group::drawIORegion(cairo_t* cairo) const
   {
-    cairo::CairoSave cs(cairo);
-    float left, right, z=zoomFactor();
-    margins(left,right);    
+    const cairo::CairoSave cs(cairo);
+    float left, right; 
+    margins(left,right);
+    const float z=zoomFactor();
     float y=notchY(inVariables), dy=topMargin*edgeScale();
     cairo_set_source_rgba(cairo,0,1,1,0.5);
-    float w=0.5*z*iWidth(), h=0.5*z*iHeight();
+    const float w=0.5*z*iWidth(), h=0.5*z*iHeight();
     
     cairo_move_to(cairo,-w,-h);
     // create notch in input region
@@ -1138,7 +1219,7 @@ namespace minsky
   float Group::rotFactor() const
   {
     float rotFactor;
-    float ac=abs(cos(rotation()*M_PI/180));
+    const float ac=abs(cos(rotation()*M_PI/180));
     static const float invSqrt2=1/sqrt(2);
     if (ac>=invSqrt2) 
       rotFactor=1.15/ac; //use |1/cos(angle)| as rotation factor
@@ -1147,13 +1228,45 @@ namespace minsky
     return rotFactor;
   }
 
+  void Group::positionEdgeVariables() const
+  {
+    // Replicates the positioning logic of draw1edge() without requiring a
+    // Cairo context. Edge I/O variable world-space positions are only set
+    // during a draw() call (via moveTo inside draw1edge()). Calling this
+    // before hit-testing ensures RenderVariable::inImage() sees the correct
+    // positions. Fixes issue #610 (unable to pull wire from group output).
+    float leftMargin, rightMargin;
+    margins(leftMargin, rightMargin);
+    const float z = zoomFactor();
+
+    layoutEdgeVariables(inVariables, -0.5f * (iWidth() * z - leftMargin), this, rotation());
+    layoutEdgeVariables(outVariables, 0.5f * (iWidth() * z - rightMargin), this, rotation());
+  }
+
   ItemPtr Group::select(float x, float y) const
   {
+    // Short-circuit: no edge variables to hit-test.
+    if (inVariables.empty() && outVariables.empty())
+      return nullptr;
+
+    // Short-circuit: avoid the expensive positionEdgeVariables() call when
+    // (x,y) is clearly outside the expanded group bounding box. Using
+    // w+h as the conservative AABB half-extent covers all rotation angles.
+    const float z = zoomFactor();
+    const float w = 0.5f * iWidth() * z;
+    const float h = 0.5f * iHeight() * z + topMargin * z;
+    const float maxExtent = w + h;
+    if (abs(x - this->x()) > maxExtent || abs(y - this->y()) > maxExtent)
+      return nullptr;
+
+    // Ensure edge variable positions are up-to-date before hit-testing.
+    // (Positions are otherwise only set during draw1edge() in a render pass.)
+    positionEdgeVariables();
     for (auto& v: inVariables)
-      if (RenderVariable(*v).inImage(x,y)) 
+      if (RenderVariable(*v).inImage(x,y) || v->clickType(x,y) == ClickType::onPort)
         return v;
     for (auto& v: outVariables)
-      if (RenderVariable(*v).inImage(x,y)) 
+      if (RenderVariable(*v).inImage(x,y) || v->clickType(x,y) == ClickType::onPort)
         return v;
     return nullptr;
   }
@@ -1207,6 +1320,14 @@ namespace minsky
   return vector<string>(r.begin(),r.end());
 }
 
+  void Group::gotoBookmark_b(const Bookmark& b)
+  {
+    moveTo(b.x, b.y);
+    zoom(x(),y(),b.zoom/(relZoom*zoomFactor()));
+    // TODO add canvas::gotoBookmark to avoid dependency inversion
+    if (this==cminsky().canvas.model.get()) minsky().canvas.requestRedraw();
+  }
+  
   std::string Group::defaultExtension() const
   {
     if (findAny(&GroupItems::items, [](const ItemPtr& i){return dynamic_cast<Ravel*>(i.get());}))
@@ -1216,16 +1337,86 @@ namespace minsky
 
   void Group::autoLayout()
   {
-    minsky().setBusyCursor();
+    const BusyCursor busy(minsky());
     layoutGroup(*this);
-    minsky().clearBusyCursor();
   }
 
   void Group::randomLayout()
   {
-    minsky().setBusyCursor();
+    const BusyCursor busy(minsky());
     randomizeLayout(*this);
-    minsky().clearBusyCursor();
   }
-  
+
+  vector<Summary> Group::summariseGodleys() const
+  {
+    vector<Summary> r;
+    recursiveDo(&GroupItems::items, [&](const Items&,Items::const_iterator i) {
+      if (auto g=dynamic_cast<GodleyIcon*>(i->get()))
+        {
+          auto summary=g->summarise();
+          r.insert(r.end(),summary.begin(), summary.end());
+        }
+      return false;
+    });
+    return r;
+  }
+
+  void Group::renameAllInstances(const std::string& valueId, const std::string& newName)
+    {
+      // unqualified versions of the names
+      auto p=valueId.find(':');
+      string uqFromName=(p!=string::npos)? valueId.substr(p+1): valueId;
+      string uqNewName = newName.substr(newName[0]==':'? 1: 0);
+      set<GodleyIcon*> godleysToUpdate;
+#ifndef NDEBUG
+      auto numItems=this->numItems();
+#endif
+      recursiveDo
+          (&GroupItems::items, [&](Items&,Items::iterator i)
+           {
+             if (auto v=(*i)->variableCast())
+               if (v->valueId()==valueId)
+                 {			 
+                   auto varScope=scope(v->group.lock(), valueId);
+                   if (auto g=dynamic_cast<GodleyIcon*>(v->controller.lock().get()))
+                     {
+                       if (varScope==g->group.lock() ||
+                           (!varScope && g->group.lock()==cminsky().model)) // fix local variables
+                         g->table.rename(uqFromName, uqNewName);
+                       
+                       // scope of an external ref in the Godley Table
+                       auto externalVarScope=scope(g->group.lock(), ':'+uqNewName);
+                       // if we didn't find it, perhaps the outerscope variable hasn't been changed
+                       if (!externalVarScope)
+                         externalVarScope=scope(g->group.lock(), ':'+uqFromName);
+
+                       if (varScope==externalVarScope ||  (isGlobal(varScope) && isGlobal(externalVarScope)))
+                         // fix external variable references
+                         g->table.rename(':'+uqFromName, ':'+uqNewName);
+                       // GodleyIcon::update invalidates the iterator, so postpone update
+                       godleysToUpdate.insert(g);
+                     }
+                   else
+                     {
+                       // ensure locality is preserved across the rename
+                       v->name(varScope==v->group.lock()? uqNewName: (':'+uqNewName));
+                       if (auto vv=v->vValue()) 
+                         v->retype(vv->type()); // ensure correct type. Note this invalidates v.
+                     }
+                 }
+             return false;
+           });
+        assert(this->numItems()==numItems);
+        for (auto g: godleysToUpdate)
+          {
+            g->update();
+            assert(this->numItems()==numItems);
+          }
+      minsky().requestReset();   // Updates model after variables rename. For ticket 1109.    
+    }
+
 }
+
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Group);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::ItemT<minsky::Group>);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Bookmark);

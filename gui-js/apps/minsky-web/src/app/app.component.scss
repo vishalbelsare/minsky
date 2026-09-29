@@ -1,0 +1,80 @@
+@use '../../../../libs/shared/src/lib/theme/variables' as *;
+:host {
+  display: flex;
+  flex-direction: column;
+  // height: $app-height;
+  // height: $app-height;
+  height: -webkit-fill-available;
+  width: -webkit-fill-available;
+
+  overflow: hidden;
+}
+
+.example-button-row {
+  margin-left: 0.5rem;
+  a {
+    border: 2px solid $toolbar-border-light;
+    background-color: $toolbar-bg;
+    color: $toolbar-border-focus;
+    &:active,
+    &:focus {
+      border: 2px solid $toolbar-border;
+    }
+  }
+  .mat-mdc-button-base {
+    margin: 5px 5px 5px 0;
+  }
+}
+
+.tabs-section {
+  border-top: 1px solid $toolbar-box;
+  flex: 1;
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid $toolbar-box;
+    flex-wrap: no-wrap;
+    .tab {
+      border-left: 2px solid $toolbar-border;
+      background-color: $toolbar-bg;
+      padding: $padding;
+      color: black;
+      label {
+        padding: 3px;
+        margin: 2px;
+        font-size: $primary-font;
+      }
+      label:focus {
+        outline: none;
+      }
+    }
+    .tab:focus {
+      outline: none;
+    }
+  }
+  .spacer {
+    flex-grow: 1;
+  }
+}
+
+.spinner {
+  position: absolute;
+  top: 60%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  ::ng-deep .mat-mdc-progress-spinner circle,
+  .mat-mdc-spinner circle {
+    stroke: $primary-yellow;
+  }
+}
+
+.active-bg {
+  background-color: $white !important;
+}
+
+.minsky-service {
+  margin-right: 10px !important;
+}
+
+.variables {
+  cursor: pointer;
+}

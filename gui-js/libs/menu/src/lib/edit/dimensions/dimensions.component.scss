@@ -1,0 +1,67 @@
+@use '../../../../../shared/src/lib/theme/common-style' as *;
+
+.align {
+  display: flex;
+  justify-content: space-evenly;
+}
+
+.form-wrapper {
+  height: 100vh;
+  width: 100vw;
+
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: stretch;
+
+  form {
+    width: 100%;
+
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .form-headers {
+    span {
+      padding: 5px 5px 0px 5px;
+      display: flex;
+      justify-content: flex-start;
+      align-items: center;
+    }
+  }
+
+  .form-buttons {
+    flex: 0;
+    margin: 0px;
+
+    button {
+      margin: 5px;
+    }
+  }
+}
+
+select {
+  height: 1.25rem;
+}
+
+.type {
+  margin-right: 1.125rem;
+  margin-left: 1.125rem;
+  width: 8rem;
+}
+
+.autocomplete {
+  width: 11.125rem;
+}
+
+.dimension {
+  width: 8rem;
+}
+
+::ng-deep .mat-mdc-option-text {
+  font-size: 0.7rem !important;
+}
+
+::ng-deep .mat-mdc-option {
+  height: 25px !important;
+}

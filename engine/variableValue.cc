@@ -16,17 +16,42 @@
   You should have received a copy of the GNU General Public License
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
-#include "variableValue.h"
+#include "minsky.h"
+#include "variableValues.h"
 #include "flowCoef.h"
 #include "str.h"
-#include "minsky.h"
+#include "valueId.h"
+
+#include "CSVTools.xcd"
+#include "constMap.rcd"
+#include "dimension.rcd"
+#include "hypercube.rcd"
+#include "hypercube.xcd"
+#include "index.rcd"
+#include "index.xcd"
+#include "nobble.h"
+#include "slider.rcd"
+#include "tensorInterface.rcd"
+#include "tensorInterface.xcd"
+#include "tensorVal.rcd"
+#include "tensorVal.xcd"
+#include "units.rcd"
+#include "userFunction.h"
+#include "variableValue.rcd"
+#include "variableValues.rcd"
+#include "variableValues.xcd"
+#include "xvector.rcd"
 #include "minsky_epilogue.h"
+
 #include <iomanip>
 #include <error.h>
 
+using namespace ecolab;
+using namespace std;
+
 #ifdef WIN32
 // std::quoted not supported (yet) on MXE
-string quoted(const std::string& x)
+string quoted(const string& x)
 {
   string r="\"";
   for (auto& i: x)
@@ -38,13 +63,40 @@ string quoted(const std::string& x)
 }
 #endif
 
-using namespace ecolab;
-using namespace std;
 namespace minsky
 {
-  std::vector<double> ValueVector::stockVars(1);
-  std::vector<double> ValueVector::flowVars(1);
+  std::vector<double,CIVITA_ALLOCATOR<double>> ValueVector::stockVars(1);
+  std::vector<double,CIVITA_ALLOCATOR<double>> ValueVector::flowVars(1);
 
+  namespace {
+    // special scalar constants
+    struct SpecialConst: public VariableValue
+    {
+      using ITensorVal::operator=;
+      SpecialConst(const string& name, const string& init):
+        VariableValue(VariableType::constant,name) {m_init=init;}
+    };
+  }
+  
+  VariableValuePtr& VariableValues::zero() {
+    static VariableValuePtr s_zero(make_shared<SpecialConst>("constant:zero","0"));
+    return s_zero;
+  }
+  VariableValuePtr& VariableValues::one() {
+    static VariableValuePtr s_one(make_shared<SpecialConst>("constant:one","1"));
+    return s_one;
+  }
+
+  void VariableValue::importFromCSV(const std::vector<std::string>& filenames)
+  {
+    if (!filenames.empty())
+      url=filenames[0];
+    loadValueFromCSVFile(*this, filenames, spec);
+    minsky().populateMissingDimensionsFromVariable(*this);
+    if (!hypercube().dimsAreDistinct())
+      throw runtime_error("Axes of imported data should all have distinct names");
+  }
+  
   bool VariableValue::idxInRange() const
   {return m_type==undefined || idx()+size()<=
       (isFlowVar()?ValueVector::flowVars.size(): ValueVector::stockVars.size());}
@@ -62,11 +114,12 @@ namespace minsky
     index(x.index());
     hypercube(x.hypercube());
     assert(idxInRange());
-    memcpy(&valRef(), x.begin(), x.size()*sizeof(x[0]));
+    if (x.size())
+      memcpy(&valRef(), x.begin(), x.size()*sizeof(x[0]));
     return *this;
   }
 
-  VariableValue& VariableValue::operator=(const ITensor& x)
+  VariableValue& VariableValue::asg(const ITensor& x)
   {
     index(x.index());
     hypercube(x.hypercube());
@@ -88,11 +141,19 @@ namespace minsky
       case constant:
       case parameter:
         m_idx=ValueVector::flowVars.size();
+        assert(size());
+        // return a more meaningful error message to the user than what STL does
+        if (ValueVector::flowVars.max_size()-ValueVector::flowVars.size()<size())
+          throw runtime_error("Maximum processing data exceeded.");
         ValueVector::flowVars.resize(ValueVector::flowVars.size()+size());
         break;
       case stock:
       case integral:
         m_idx=ValueVector::stockVars.size();
+        assert(size());
+        // return a more meaningful error message to the user than what STL does
+        if (ValueVector::stockVars.max_size()-ValueVector::stockVars.size()<size())
+          throw runtime_error("Maximum processing data exceeded.");
         ValueVector::stockVars.resize(ValueVector::stockVars.size()+size());
         break;
       default: break;
@@ -108,19 +169,19 @@ namespace minsky
       case tempFlow:
       case constant:
       case parameter:
-        assert(idxInRange());
-         if (size_t(m_idx)<ValueVector::flowVars.size())
-           return ValueVector::flowVars[m_idx];
-         break;
+        //assert(idxInRange()); // assertions fail after cancelled reset()
+        if (size_t(m_idx)<ValueVector::flowVars.size())
+          return ValueVector::flowVars[m_idx];
+        break;
       case stock:
       case integral:
-        assert(idxInRange());
+        //assert(idxInRange()); // assertions fail after cancelled reset()
         if (size_t(m_idx)<ValueVector::stockVars.size())
           return ValueVector::stockVars[m_idx];
         break;
       default: break;
       }
-    static double zero=0;
+    static const double zero=0;
     return zero;
   }
   
@@ -148,13 +209,63 @@ namespace minsky
     throw error("invalid access of variable value reference: %s",name.c_str());
   }
   
-  TensorVal VariableValue::initValue
-  (const VariableValues& v, set<string>& visited) const
+  const std::string& VariableValue::init(const std::string& x)  {
+    m_init=x;
+    // don't reallocate if initialisation will be ignored (eg wired flow)
+    if (x.empty() || (m_type!=parameter && isFlowVar() && cminsky().definingVar(valueId())))
+      return m_init;
+    auto tensorInit=cminsky().variableValues.initValue(*this);
+    if (tensorInit.size()>size()) m_idx=-1; // force reallocation
+    index(tensorInit.index());
+    hypercube(tensorInit.hypercube());
+    return m_init;
+  }
+
+  const Hypercube& VariableValue::hypercube() const
   {
-    if (tensorInit.rank()>0)
-      return tensorInit;
+    if (rhs) return rhs->hypercube();
+    // return the initialisation hypercube if not a defined flowVar
+    if (tensorInit.rank()>0 && (!isFlowVar() || m_type==parameter || !cminsky().definingVar(valueId())))
+      return tensorInit.hypercube();
+    return m_hypercube;
+  }
+
+  void VariableValue::sliderSet(double x)
+  {
+    if (!isfinite(x)) return;
+    if (x<sliderMin) x=sliderMin;
+    if (x>sliderMax) x=sliderMax;
+    sliderStep=maxSliderSteps();    
+    init(to_string(x));
+    setValue(x);
+  }
+
+  void VariableValue::incrSlider(double step)
+  {
+    sliderSet(value()+step*(sliderStepRel? value(): 1)*sliderStep);
+  }
+  
+  void VariableValue::adjustSliderBounds()
+  {
+    if (size()==1 && !isnan(value()))
+      {
+        if (!isfinite(sliderMax) ||sliderMax<value())
+          sliderMax=value()? abs(10*value()):1;
+        if (!isfinite(sliderMin) || sliderMin>=value())
+          sliderMin=value()? -abs(10*value()):-1;
+        assert(sliderMin<sliderMax);
+        sliderStep=maxSliderSteps(); 
+      }
+  }
+
+  
+  TensorVal VariableValues::initValue
+  (const VariableValue& v, set<string>& visited) const
+  {
+    if (v.tensorInit.rank()>0)
+      return v.tensorInit;
     
-    FlowCoef fc(init);
+    const FlowCoef fc(v.init());
     if (trimWS(fc.name).empty())
       return fc.coef;
 
@@ -162,7 +273,7 @@ namespace minsky
     auto p=fc.name.find('(');
     if (p!=string::npos)
       {
-        string fn=fc.name.substr(0,p);
+        //        const string fn=fc.name.substr(0,p);
         // unpack args
         const char* x=fc.name.c_str()+p+1;
         char* e;
@@ -181,17 +292,17 @@ namespace minsky
         TensorVal r(dims);
         r.allocVal();
 
-        if (fn=="iota")
+        if (fc.name.starts_with("iota"))
           for (size_t i=0; i<r.size(); ++i)
             r[i]=i;
-        else if (fn=="one")
+        else if (fc.name.starts_with("one"))
           for (size_t i=0; i<r.size(); ++i)
             r[i]=1;
-        else if (fn=="zero" || fn=="eye")
+        else if (fc.name.starts_with("zero") || fc.name.starts_with("eye"))
           {
             for (size_t i=0; i<r.size(); ++i)
               r[i]=0;
-            if (fn=="eye")
+            if (fc.name.starts_with("eye"))
               {
                 // diagonal elements set to 1
                 // find minimum dimension, and stride of diagonal elements
@@ -204,119 +315,61 @@ namespace minsky
                   r[stride*i]=1;
               }
           }
-        else if (fn=="rand")
+        else if (fc.name.starts_with("rand"))
           {
             for (size_t i=0; i<r.size(); ++i)
-              r[i]=double(rand())/RAND_MAX;
+              r[i]=double(rand())/RAND_MAX; // NOLINT
           }
         return r;
       }
         
     // resolve name
-    auto valueId=VariableValue::valueId(m_scope.lock(), fc.name);
-    if (visited.count(valueId))
+    auto valueId=minsky::valueId(v.m_scope.lock(), fc.name);
+    if (visited.contains(valueId))
       throw error("circular definition of initial value for %s",
                   fc.name.c_str());
-    VariableValues::const_iterator vv=v.end();
-    vv=v.find(valueId);
-    if (vv==v.end())
-      throw error("Unknown variable %s in initialisation of %s",fc.name.c_str(), name.c_str());
+    const VariableValues::const_iterator vv=find(valueId);
+    if (vv==end())
+      throw error("Unknown variable %s in initialisation of %s",fc.name.c_str(), v.name.c_str());
 
     visited.insert(valueId);
-    return fc.coef*vv->second->initValue(v, visited);
+    return fc.coef*initValue(*vv->second, visited);
   }
 
-  void VariableValue::reset(const VariableValues& v)
+  void VariableValues::resetValue(VariableValue& v) const
   {
-      if (m_idx<0) allocValue();
-      // initialise variable only if its variable is not defined or it is a stock
-      if (!isFlowVar() || !cminsky().definingVar(valueId()))
-        {
-          if (tensorInit.size())
-            {
-              // ensure dimensions are correct
-              auto hc=tensorInit.hypercube();
-              for (auto& xv: hc.xvectors)
-                {
-                  auto dim=cminsky().dimensions.find(xv.name);
-                  if (dim!=cminsky().dimensions.end())
-                    xv.dimension=dim->second;
-                }
-              tensorInit.hypercube(hc);
-            }
-          if (tensorInit.rank()>0)
-            operator=(tensorInit);
-          else
-            operator=(initValue(v));
-        }
-      assert(idxInRange());
-  }
-
-
-  int VariableValue::scope(const std::string& name) 
-  {
-    smatch m;
-    auto nm=utf_to_utf<char>(name);
-    if (regex_search(nm, m, regex(R"((\d*)]?:.*)")))
-      if (m.size()>1 && m[1].matched && !m[1].str().empty())
-        {
-          int r;
-          sscanf(m[1].str().c_str(),"%d",&r);
-          return r;
-        }
-      else
-        return -1;
-    else
-      // no scope information is present
-      throw error("scope requested for local variable");
-  }
-
-  GroupPtr VariableValue::scope(GroupPtr scope, const std::string& a_name)
-  {
-    auto name=utf_to_utf<char>(stripActive(utf_to_utf<char>(a_name)));
-    if (name[0]==':' && scope)
+    if (v.idx()<0) v.allocValue();
+    // initialise variable only if its variable is not defined or it is a stock
+    if (!v.isFlowVar() || !cminsky().definingVar(v.valueId()))
       {
-        // find maximum enclosing scope that has this same-named variable
-        for (auto g=scope->group.lock(); g; g=g->group.lock())
-          for (auto& i: g->items)
-            if (auto* v=i->variableCast())
+        if (v.tensorInit.rank())
+          {
+            // ensure dimensions are correct
+            auto hc=v.tensorInit.hypercube();
+            for (auto& xv: hc.xvectors)
               {
-                auto n=stripActive(v->name());
-                if (n==name.substr(1)) // without ':' qualifier
-                  {
-                    scope=g;
-                    goto break_outerloop;
-                  }
+                auto dim=cminsky().dimensions.find(xv.name);
+                if (dim!=cminsky().dimensions.end())
+                  xv.dimension=dim->second;
               }
-        scope.reset(); // global var
-      break_outerloop: ;
+            v.tensorInit.hypercube(hc);
+          }
+        if (v.tensorInit.rank())
+          v=v.tensorInit;
+        else
+          v=initValue(v);
       }
-    return scope;
+    assert(v.idxInRange());
   }
-  
-  
-  string VariableValue::valueIdFromScope(const GroupPtr& scope, const std::string& name)
-  {
-    if (name.empty() || !scope || !scope->group.lock())
-      return VariableValue::valueId(-1,utf_to_utf<char>(name)); // retain previous global var id
-    return VariableValue::valueId(size_t(scope.get()), utf_to_utf<char>(name));
-}
-  
-  std::string VariableValue::uqName(const std::string& name)
-  {
-    string::size_type p=name.rfind(':');
-    if (p==string::npos)
-      return utf_to_utf<char>(name);
-    return utf_to_utf<char>(name).substr(p+1);
-  }
- 
+
+
   string VariableValues::newName(const string& name) const
   {
     int i=1;
     string trialName;
     do
       trialName=utf_to_utf<char>(name)+to_string(i++);
-    while (count(VariableValue::valueId(trialName)));
+    while (count(valueId(trialName)));
     return trialName;
   }
 
@@ -327,18 +380,14 @@ namespace minsky
     ValueVector::flowVars.clear();
     for (auto& v: *this) {
       v.second->reset_idx();  // Set idx of all flowvars and stockvars to -1 on reset. For ticket 1049		
-      v.second->allocValue().reset(*this);
+      resetValue(v.second->allocValue());
       assert(v.second->idxInRange());
     }
-}
+  }
 
   bool VariableValues::validEntries() const
   {
-    return all_of(begin(), end(), [](const value_type& v){return v.second->isValueId(v.first);});
-//    for (auto& v: *this)
-//      if (!v.second->isValueId(v.first))
-//        return false;
-//    return true;
+    return all_of(begin(), end(), [](const value_type& v){return isValueId(v.first);});
   }
 
 
@@ -366,9 +415,9 @@ namespace minsky
       case 2: case 3: width=digits+2; decimal_places=digits-3; break;
       default: return ""; // shouldn't be here...
       }
-    char val[10];
+    char val[80];
     const char conv[]="%*.*f";
-    sprintf(val,conv,width,decimal_places,value*pow(10,-e.engExp));
+    snprintf(val,sizeof(val),conv,width,decimal_places,value*pow(10,-e.engExp));
     return val;
   }
   
@@ -376,37 +425,169 @@ namespace minsky
   {return exp!=0? "×10<sup>"+std::to_string(exp)+"</sup>": "";}
 
 
-  void VariableValue::exportAsCSV(const string& filename, const string& comment) const
+  void VariableValue::exportAsCSV(const string& filename, const string& comment, bool tabular) const
   {
     ofstream of(filename);
+    if (!of)
+      throw runtime_error("Unable to open "+filename+" for writing.");
     if (!comment.empty())
       of<<R"(""")"<<comment<<R"(""")"<<endl;
                
+    // calculate longest dimension
+    auto dims=hypercube().dims();
+    size_t longestDim=max_element(dims.begin(),dims.end())-dims.begin();
+
     const auto& xv=hypercube().xvectors;
+    
     ostringstream os;
     for (const auto& i: xv)
       {
-        if (&i>&xv[0]) os<<",";
+        if (&i>xv.data()) os<<",";
         os<<json(static_cast<const NamedDimension&>(i));
       }
     of<<quoted("RavelHypercube=["+os.str()+"]")<<endl;
-    for (const auto& i: hypercube().xvectors)
-      of<<"\""<<i.name<<"\",";
-    of<<"value$\n";
+    if (tabular && rank()>0)
+      of<<"HorizontalDimension="<<quoted(xv[longestDim].name)<<endl;
+    
+    for (size_t i=0; i<xv.size(); ++i)
+      if (!tabular || i!=longestDim)
+        of<<CSVQuote(xv[i].name,',')<<",";
+
+    if (tabular && rank()>0)
+      for (size_t k=0; k<dims[longestDim]; ++k)
+        {
+          if (k>0) of<<",";
+          of<<CSVQuote(str(xv[longestDim][k],xv[longestDim].dimension.units),',');
+        }
+    else
+      of<<"value$";
+    of<<"\n";
 
     auto idxv=index();
-    size_t i=0;
-    for (auto d=begin(); d!=end(); ++i, ++d)
-      if (isfinite(*d))
-        {
-          ssize_t idx=idxv.empty()? i: idxv[i];
-          for (size_t j=0; j<rank(); ++j)
+
+    if (tabular && rank()>0)
+      {
+        size_t stride=1;
+        for (size_t i=0; i<longestDim; ++i)
+          stride*=dims[i];
+        for (size_t i=0; i<hypercube().numElements(); i+=stride*dims[longestDim])
+          for (size_t j=0; j<stride; ++j)
             {
-              auto div=std::div(idx, ssize_t(hypercube().xvectors[j].size()));
-              of << "\""<<str(hypercube().xvectors[j][div.rem], hypercube().xvectors[j].dimension.units) << "\",";
-              idx=div.quot;
+              // collect elements in a buffer, which can be discarded if no data on line
+              bool isData=false;
+              vector<double> data;
+              data.reserve(dims[longestDim]);
+              for (size_t k=0; k<stride*dims[longestDim]; k+=stride)
+                {
+                  data.push_back(this->atHCIndex(i+j+k));
+                  if (isfinite(data.back())) isData=true;
+                }
+              if (isData)
+                {
+                  auto idx=i+j;
+                  for (size_t k=0; k<rank(); ++k)
+                    {
+                      auto div=std::div(idx, ssize_t(dims[k]));
+                      if (k!=longestDim)
+                        {
+                          if (k>1 || (k>0 && longestDim>0)) of<<",";
+                          of << "\""<<str(xv[k][div.rem], xv[k].dimension.units) << "\"";
+                        }
+                      idx=div.quot;
+                    }
+                  for (auto d: data)
+                    {
+                      of<<",";
+                      if (isfinite(d)) of<<d;
+                    }
+                  of<<"\n";
+                }
             }
-          of << *d << endl;
-        }
+      }
+    else
+      {
+        size_t i=0;
+        for (auto d=begin(); d!=end(); ++i, ++d)
+          if (isfinite(*d))
+            {
+              ssize_t idx=idxv.empty()? i: idxv[i];
+              for (size_t j=0; j<rank(); ++j)
+                {
+                  auto div=std::div(idx, ssize_t(dims[j]));
+                  of << "\""<<str(xv[j][div.rem], xv[j].dimension.units) << "\",";
+                  idx=div.quot;
+                }
+              of << *d << "\n";
+            }
+      }
   }
+
+  Summary VariableValue::summary() const
+  {
+    MathDAG::SystemOfEquations system(cminsky());
+    MathDAG::VariableDAGPtr varNode;
+    switch (type())
+      {
+      case integral:
+      case stock:
+        varNode=system.getNodeFromIntVar(valueId());
+        break;
+      default:
+        varNode=system.getNodeFromValueId(valueId());
+        break;
+      }
+
+    string scopeName=":";
+    if (auto scope=m_scope.lock())
+      if (scope!=cminsky().model)
+        scopeName=scope->title.empty()? scope->id(): scope->title;
+
+    string godleyName;
+    string definition=varNode && varNode->rhs? varNode->rhs->latexStr(): "";
+    string udfDefinition;
+    try
+      {
+        udfDefinition=varNode && varNode->rhs? varNode->rhs->matlabStr():"";
+      }
+    catch (const std::exception& ex)
+      {
+        udfDefinition=ex.what(); // if matlabStr fails, insert error message
+      }
+    if (auto var=cminsky().definingVar(valueId()))
+      {
+        if (auto controller=dynamic_pointer_cast<GodleyIcon>(var->controller.lock()))
+          godleyName=controller->table.title.empty()? controller->id(): controller->table.title;
+        if (auto p=var->ports(1).lock())
+          if (!p->wires().empty())
+            if (auto udf=dynamic_cast<UserFunction*>(&p->wires().front()->from()->item()))
+              {
+                definition="\\text{"+udf->expression+"}";
+                udfDefinition=udf->expression;
+              }
+      }
+
+    
+    return Summary{
+      valueId(),
+      name,
+      type(),
+      definition,
+      udfDefinition,
+      init(),
+      sliderStep, sliderMin, sliderMax,
+      value(),
+      scopeName,
+      godleyName,
+      hypercube().dims(),
+      units.latexStr()
+    };
+    
+  }
+
 }
+
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Units);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::ValueVector);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::VariableValue);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::VariableValues);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::VariableValuePtr);

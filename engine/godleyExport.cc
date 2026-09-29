@@ -17,11 +17,15 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "pango.h"
+#include "cairoItems.h"
 #include "godleyExport.h"
 #include "flowCoef.h"
 #include "latexMarkup.h"
 #include "group.h"
 #include "selection.h"
+#include "lasso.h"
+#include "variableValue.h"
 #include "minsky_epilogue.h"
 
 using namespace std;
@@ -33,7 +37,7 @@ namespace minsky
   {
     string fcStr(const FlowCoef& fc)
     {
-      auto nm=VariableValue::uqName(fc.name);
+      auto nm=uqName(fc.name);
       if (fc.coef==1)
         return nm;
       if (fc.coef==-1)
@@ -58,14 +62,14 @@ namespace minsky
   {
     s<<'"'<<g.getCell(0,0)<<'"';
     for (unsigned i=1; i<g.cols(); ++i)
-      s<<",\""<<trim(latexToPango(VariableValue::uqName(g.getCell(0,i))))<<'"';
+      s<<",\""<<trim(latexToPango(uqName(g.getCell(0,i))))<<'"';
     s<<'\n';
     if (g.doubleEntryCompliant)
       {
         s<<"Asset Class";
         for (unsigned i=1; i<g.cols(); ++i)
           s<<","<<enum_keysData<GodleyAssetClass::AssetClass>::
-            keysData[g._assetClass(i)].name;
+            keysData[g.assetClass(i)].name;
         s<<"\n";
       }
     for (unsigned r=1; r<g.rows(); ++r)
@@ -86,7 +90,7 @@ namespace minsky
     f<<"|}\n\\hline\n";
     f<<"Flows $\\downarrow$ / Stock Variables $\\rightarrow$";
     for (unsigned i=1; i<g.cols(); ++i)
-      f<<"&\\multicolumn{1}{|c|}{$"<<VariableValue::uqName(g.getCell(0,i))<<"$}";
+      f<<"&\\multicolumn{1}{|c|}{$"<<uqName(g.getCell(0,i))<<"$}";
 
     // asset class descriptors
     if (g.doubleEntryCompliant)
@@ -103,10 +107,10 @@ namespace minsky
         };
           
         for (unsigned i=1; i<g.cols(); ++i)
-          if (g._assetClass(i)!=asset)
+          if (g.assetClass(i)!=asset)
             {
               outputAC();
-              asset=g._assetClass(i);
+              asset=g.assetClass(i);
               repeat=1;
             }
           else

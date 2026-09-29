@@ -63,18 +63,12 @@ namespace minsky
   inline std::string stripActive(const std::string& s) {
     std::string r; r.reserve(s.length());
     for (size_t i=0; i<s.length(); ++i)
-      switch (s[i])        
-        {
-        case '\\':
-          r+="∖";
-          break;
-        default:
-          if (isspace(s[i]))
-            r+="␣";
-          else
-            r+=s[i];
-          break;
-        }
+      if (s[i]=='\\')        
+        r+="∖";
+      else if (isspace(s[i]))
+        r+="␣";
+      else
+        r+=s[i];
     if (r.empty()) return "_";
     return r;
   }
@@ -148,5 +142,36 @@ namespace minsky
     return i;
   }
 
+  /// checks if the input stream has the UTF-8 byte ordering marker,
+  /// and removes it if present
+  inline void stripByteOrderingMarker(std::istream& s)
+  {
+    char bom[4]="\0\0\0";
+    s.get(bom,4);
+    if (strcmp(bom,"\357\273\277")==0) return; //skipped BOM
+    if (memcmp(bom,"\0\0\376",3)==0)
+      if (s && s.get()=='\377') // UTF-32(BE) file detected
+        throw std::runtime_error("Only UTF-8 encoded files supported");
+    if (strncmp(bom,"\376\377",2)==0 || strncmp(bom,"\377\376",2)==0)
+      // UTF-16 or UTF-32(LE) file detected
+      throw std::runtime_error("Only UTF-8 encoded files supported");
+    s.seekg(0); //rewind input stream
+  }
+
+  /// quotes a string if it contains a separator character, and double quotes quotes
+  inline std::string CSVQuote(const std::string& x, char sep)
+  {
+    std::string r;
+    bool needsQuoting=false;
+    for (auto c: x)
+      {
+        r+=c;
+        if (c=='"') {r+='"'; needsQuoting=true;}
+        if (c==sep) needsQuoting=true;
+      }
+    if (needsQuoting) return "\""+r+"\"";
+    return r;
+  }
+  
 }
 #endif

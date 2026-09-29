@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+	<mime-type type="application/au.com.hpcoders.Ravelation">
+		<comment>Ravel dataset file</comment>
+		<sub-class-of type="text/plain" />
+		<generic-icon name="au.com.hpcoders.Minsky" />
+		<glob pattern="*.rvl" />
+	</mime-type>
+</mime-info>

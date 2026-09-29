@@ -33,6 +33,11 @@ namespace
     const char* first, *second;
   }
     symbolData[]={
+      {"#","#"},
+      {"$","$"},
+      {"%","%"},
+      {"&","&amp;"},
+      {"_","_"},
       {"{","{"},
       {"}","}"},
       {"euro","€"},
@@ -45,6 +50,7 @@ namespace
       {"zeta","ζ"},
       {"eta","η"},
       {"theta","θ"},
+      {"vartheta","ϑ"},
       {"iota","ι"},
       {"kappa","κ"},
       {"lambda","λ"},
@@ -62,6 +68,7 @@ namespace
       {"phi","φ"},
       {"varphi","ϕ"},
       {"chi","χ"},
+      {"psi","ψ"},
       {"omega","ω"},
       {"Gamma","Γ"},
       {"Delta","Δ"},
@@ -683,6 +690,10 @@ namespace
         return r;
       }
 
+    // symbols that stand for themselves
+    if (strchr("#$%&_{}",*input))
+      return string(input++,1);
+    
     // normal LaTeX token processing
     while (*input!='\0' && isalpha(*input))
       r+=*input++;
@@ -696,7 +707,7 @@ namespace
   string utf8char(const char*& input)
   {
     string r;
-    char lead=*input;
+    const char lead=*input;
     if ((lead&0xC0)==0xC0) r+=*input++; // multibyte byte sequence
     if ((lead&0xE0)==0xE0) r+=*input++; // 3 or more
     if ((lead&0xF8)==0xF0) r+=*input++; // 4 bytes
@@ -733,8 +744,6 @@ namespace
       if (*input=='{')
         if (x=="rm") // fake an rm tag by deitalicising
           {
-            *this+="<span style=\"normal\">";
-            push_back("span");
             input++;
           }
         else
@@ -750,11 +759,10 @@ namespace
           if (!x.empty()) 
             *this+="<"+x+">";
           processLaTeX(input);
-          //          pop();
           return;
         }
       else if (x=="rm") 
-        *this+=string("<span style=\"normal\">")+utf8char(input)+"</span>";
+        *this+=utf8char(input);
       else if (!x.empty())
         *this+=string("<")+x+">"+utf8char(input)+"</"+x+">";
     }
@@ -792,8 +800,8 @@ namespace
 
     void processLaTeX(const char*& input)
     {
-      string token=parseLaTeXSym(++input);
-      map<string,string>::const_iterator repl=latexSymbols.find(token);
+      const string token=parseLaTeXSym(++input);
+      const map<string,string>::const_iterator repl=latexSymbols.find(token);
       if (repl!=latexSymbols.end())
         *this+=repl->second;
       else if (token=="mathit" || token=="mathcal")
@@ -808,7 +816,7 @@ namespace
         {
           if (*input=='[')
             {
-              string index=parseOpt(input);
+              const string index=parseOpt(input);
               *this+="<small><sup>"+index+"</sup></small>";
             }
           *this+=latexSymbols["surd"];
@@ -818,7 +826,7 @@ namespace
         {
           // next character is the delimiter
           *this+="<tt>";
-          char delim=*input++;
+          const char delim=*input++;
           for (; *input!='\0' && *input!=delim; ++input)
             *this+=minsky::defang(*input);
           *this+="</tt>";

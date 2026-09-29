@@ -21,11 +21,14 @@
 
 #include "variable.h"
 #include "godleyTable.h"
+#include "godleyTableWindow.h"
 #include "zoom.h"
 #include "intrusiveMap.h"
 #include "classdesc_access.h"
 #include "SVGItem.h"
 #include "group.h"
+#include "valueId.h"
+#include "variableValue.h"
 
 #include <map>
 #include <cairo.h>
@@ -37,21 +40,14 @@ namespace minsky
 
   class GodleyIcon: public ItemT<GodleyIcon>
   {
+    
     /// for placement of bank icon within complex
     float flowMargin=0, stockMargin=0;
+    bool m_editorMode=false;
+    bool m_variableDisplay=false;
     CLASSDESC_ACCESS(GodleyIcon);
     friend struct SchemaHelper;
 
-    /// support godley edit window on canvas
-    struct CopiableUniquePtr: public std::unique_ptr<GodleyTableEditor>
-    {
-      // make this copiable, but do nothing on copying
-      CopiableUniquePtr();
-      ~CopiableUniquePtr();
-      CopiableUniquePtr(const CopiableUniquePtr&);
-      CopiableUniquePtr& operator=(const CopiableUniquePtr&) {return *this;}
-    };
-    CopiableUniquePtr editor;
 
     void updateBB() {
       auto wasSelected=selected;
@@ -63,53 +59,67 @@ namespace minsky
     double titleOffs() const {return !table.title.empty()? 15*zoomFactor(): 0;}
     
   public:
-    static SVGRenderer svgRenderer;
+    static SVGRenderer svgRenderer; ///< SVG icon to display when not in editor mode
     
-    GodleyIcon() {iWidth(150); iHeight(150);}
+    GodleyIcon();
     GodleyIcon(const GodleyIcon&)=default;
-    GodleyIcon& operator=(const GodleyIcon&)=default;
     ~GodleyIcon() {Item::removeControlledItems();}
 
     /// indicate whether icon is in editor mode or icon mode
-    bool editorMode() const {return editor.get();}
-    void toggleEditorMode();
+    bool editorMode() const override {return m_editorMode;}
+    void toggleEditorMode() override;
 
     /// enable/disable drawing buttons in table on canvas display
     bool buttonDisplay() const;
     void toggleButtons(); 
 
-    bool variableDisplay=true;
-    void toggleVariableDisplay() {variableDisplay=!variableDisplay; update();}
+    bool variableDisplay() const {return m_variableDisplay;}
+    void toggleVariableDisplay();
 
-    /// sets editor's display values attributes to current global preferences
-    void setEditorDisplayValues();
+    /// table data. Must be declared before editor
+    GodleyTable table;
+    /// rendering as a godley table
+    GodleyTableEditor editor{*this};
+    /// for rendering the popup window
+    GodleyTableWindow popup{*this};
+
+    /// whether to display values in this table
+    bool displayValues=false;
+    void toggleDisplayValues() {displayValues=!displayValues;}
     
-    CopiableUniquePtr godleyT;    
+    void adjustPopupWidgets() {popup.adjustWidgets();}
 
     /// scale icon until it's height or width matches \a h or \a w depending on which is minimum             
     void scaleIcon(float w, float h);         
     
     /// left margin of bank icon with Godley icon
-    float leftMargin() const {return variableDisplay? flowMargin*scaleFactor()*zoomFactor(): 0;}
+    float leftMargin() const {return variableDisplay()? flowMargin*scaleFactor()*zoomFactor(): 0;}
     /// bottom margin of bank icon with Godley icon
-    float bottomMargin() const {return variableDisplay? stockMargin*scaleFactor()*zoomFactor(): 0;}
+    float bottomMargin() const {return variableDisplay()? stockMargin*scaleFactor()*zoomFactor(): 0;}
 
     void resize(const LassoBox&) override;
-    void removeControlledItems(Group&) const override;
+    void removeControlledItems(GroupItems&) override;
  
     /// set cell(row,col) with contents val
     void setCell(int row, int col, const string& val);
     /// delete row before \a row
     void deleteRow(unsigned row);
     /// move the contents of cell at (srcRow, srcCol) to (destRow, destCol).
-    void moveCell(int srcRow, int srcCol, int destRow, int destCol);
+    struct MoveCellArgs
+    {
+      int srcRow, srcCol, destRow, destCol;
+    };
+    void moveCell(const GodleyIcon::MoveCellArgs&);
     /// flows, along with multipliers, appearing in \a col
     std::map<string,double> flowSignature(unsigned col) const;
 
     typedef std::vector<VariablePtr> Variables;
     const Variables& flowVars() const {return m_flowVars;}
     const Variables& stockVars() const {return m_stockVars;}
-    GodleyTable table;
+
+    /// summary of variables in this godley table
+    std::vector<Summary> summarise() const;
+    
     /// updates the variable lists with the Godley table
     void update();
     
@@ -124,35 +134,47 @@ namespace minsky
     /// variable icon, null otherwise, indicating that the Godley table
     /// has been selected.
     ItemPtr select(float x, float y) const override;
-    ClickType::Type clickType(float x, float y) override;
+    ClickType::Type clickType(float x, float y) const override;
 
     /// draw icon to \a context
-    void draw(cairo_t* cairo) const override;
+    void draw(const ICairoShim& cairoShim) const override;
 
     /// return the A-L-E row sum for \a row
     std::string rowSum(int row) const;
     
     /// returns valueid for variable reference in table
     // TODO: this should be refactored to a more central location
-    std::string valueId(const std::string& x) const {
-      return VariableValue::valueId(group.lock(), x);
-    }
+    std::string valueId(const std::string& x) const {return minsky::valueId(group.lock(), x);}
     /// performs dimensional analysis on stock var column \a stockName
     /// @param check indicates whether a consistency check is applied
     Units stockVarUnits(const std::string& stockName, bool check) const;
 
+    std::string currency;
     void setCurrency(const std::string& currency) 
-    {for (auto& i: m_stockVars) i->setUnits(currency);}
+    {this->currency=currency; for (auto& i: m_stockVars) i->setUnits(currency);}
       
     void insertControlled(Selection& selection) override;
 
     void onMouseDown(float, float) override;
-    void onMouseUp(float, float) override;
+    bool onMouseUp(float, float) override;
     bool onMouseMotion(float, float) override;
     bool onMouseOver(float, float) override;
     void onMouseLeave() override;
     bool onKeyPress(int, const std::string&, int) override;
     bool inItem(float, float) const override;
+
+    /// clean up popup window structures on window close
+    void destroyFrame() override {popup.destroyFrame();}
+
+    /// return true if any wires are attached to the variables
+    bool wiresAttached() const;
+
+    const GodleyIcon* godleyIconCast() const override {return this;}
+    GodleyIcon* godleyIconCast() override {return this;}
+
+    /// @{ convert mouse coordinates into editor coords
+    float toEditorX(float) const;
+    float toEditorY(float) const;
 
   private:
     void updateVars(Variables& vars, 
@@ -161,10 +183,6 @@ namespace minsky
     /// move contained variables to correct locations within icon
     void positionVariables() const;
     Variables m_flowVars, m_stockVars;
-
-    /// @{ convert mouse coordinates into editor coords
-    float toEditorX(float) const;
-    float toEditorY(float) const;
   };
 }
 

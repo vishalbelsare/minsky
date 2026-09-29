@@ -1,77 +1,87 @@
  <Minsky xmlns="http://minsky.sf.net/minsky">
   <schemaVersion>3</schemaVersion>
-  <minskyVersion>2.29.0</minskyVersion>
+  <minskyVersion>3.22.0</minskyVersion>
+  <author></author>
+  <title></title>
+  <description></description>
   <wires>
    <Wire>
     <id>85</id>
-    <from>10</from>
-    <to>4</to>
+    <from>11</from>
+    <to>5</to>
    </Wire>
    <Wire>
     <id>86</id>
-    <from>8</from>
-    <to>3</to>
+    <from>9</from>
+    <to>4</to>
    </Wire>
    <Wire>
     <id>87</id>
-    <from>6</from>
-    <to>2</to>
+    <from>7</from>
+    <to>3</to>
    </Wire>
    <Wire>
     <id>88</id>
-    <from>12</from>
-    <to>1</to>
+    <from>13</from>
+    <to>2</to>
    </Wire>
    <Wire>
     <id>89</id>
-    <from>0</from>
-    <to>20</to>
+    <from>1</from>
+    <to>21</to>
    </Wire>
    <Wire>
     <id>90</id>
-    <from>39</from>
-    <to>42</to>
-   </Wire>
-   <Wire>
-    <id>91</id>
-    <from>37</from>
+    <from>40</from>
     <to>43</to>
    </Wire>
    <Wire>
-    <id>92</id>
-    <from>51</from>
-    <to>47</to>
+    <id>91</id>
+    <from>38</from>
+    <to>44</to>
    </Wire>
    <Wire>
-    <id>93</id>
-    <from>53</from>
+    <id>92</id>
+    <from>52</from>
     <to>48</to>
    </Wire>
    <Wire>
-    <id>94</id>
-    <from>55</from>
+    <id>93</id>
+    <from>54</from>
     <to>49</to>
    </Wire>
    <Wire>
+    <id>94</id>
+    <from>56</from>
+    <to>50</to>
+   </Wire>
+   <Wire>
     <id>95</id>
-    <from>45</from>
-    <to>65</to>
+    <from>46</from>
+    <to>66</to>
    </Wire>
    <Wire>
     <id>96</id>
-    <from>41</from>
-    <to>83</to>
+    <from>42</from>
+    <to>84</to>
    </Wire>
    <Wire>
     <id>97</id>
-    <from>82</from>
-    <to>46</to>
+    <from>83</from>
+    <to>47</to>
    </Wire>
   </wires>
   <items>
    <Item>
     <detailedText>scalar&#32;input</detailedText>
-    <id>5</id>
+    <xmin>NaN</xmin>
+    <xmax>NaN</xmax>
+    <ymin>NaN</ymin>
+    <ymax>NaN</ymax>
+    <y1min>NaN</y1min>
+    <y1max>NaN</y1max>
+    <symbolEvery>1</symbolEvery>
+    <id>0</id>
     <type>SwitchIcon</type>
     <x>290</x>
     <y>125</y>
@@ -79,18 +89,28 @@
     <itemTabY>NaN</itemTabY>
     <scaleFactor>1</scaleFactor>
     <rotation>0</rotation>
-    <width>24</width>
-    <height>24</height>
+    <width>26.4</width>
+    <height>26.4</height>
     <ports>
-     <int>0</int>
      <int>1</int>
      <int>2</int>
      <int>3</int>
      <int>4</int>
+     <int>5</int>
     </ports>
+    <bookmark>false</bookmark>
+    <miniPlot>false</miniPlot>
    </Item>
    <Item>
-    <id>7</id>
+    <name>a</name>
+    <xmin>NaN</xmin>
+    <xmax>NaN</xmax>
+    <ymin>NaN</ymin>
+    <ymax>NaN</ymax>
+    <y1min>NaN</y1min>
+    <y1max>NaN</y1max>
+    <symbolEvery>1</symbolEvery>
+    <id>6</id>
     <type>Variable:parameter</type>
     <x>152</x>
     <y>112</y>
@@ -101,43 +121,29 @@
     <width>0</width>
     <height>0</height>
     <ports>
-     <int>6</int>
+     <int>7</int>
     </ports>
-    <name>a</name>
+    <bookmark>false</bookmark>
     <init>iota(5)</init>
     <slider>
      <stepRel>false</stepRel>
+     <visible>true</visible>
      <min>-1</min>
      <max>1</max>
      <step>0.1</step>
     </slider>
-    <csvDataSpec>
-     <dataRowOffset>0</dataRowOffset>
-     <dataColOffset>0</dataColOffset>
-     <separator>,</separator>
-     <quote>&quot;</quote>
-     <escape>\</escape>
-     <decSeparator>.</decSeparator>
-     <mergeDelimiters>false</mergeDelimiters>
-     <columnar>false</columnar>
-     <missingValue>NaN</missingValue>
-     <headerRow>0</headerRow>
-     <horizontalDimName>?</horizontalDimName>
-     <horizontalDimension>
-      <type>string</type>
-      <units></units>
-     </horizontalDimension>
-     <duplicateKeyAction>throwException</duplicateKeyAction>
-     <dimensionCols>
-     </dimensionCols>
-     <dimensions>
-     </dimensions>
-     <dimensionNames>
-     </dimensionNames>
-    </csvDataSpec>
+    <miniPlot>false</miniPlot>
    </Item>
    <Item>
-    <id>9</id>
+    <name>b</name>
+    <xmin>NaN</xmin>
+    <xmax>NaN</xmax>
+    <ymin>NaN</ymin>
+    <ymax>NaN</ymax>
+    <y1min>NaN</y1min>
+    <y1max>NaN</y1max>
+    <symbolEvery>1</symbolEvery>
+    <id>8</id>
     <type>Variable:parameter</type>
     <x>148</x>
     <y>156</y>
@@ -148,45 +154,31 @@
     <width>0</width>
     <height>0</height>
     <ports>
-     <int>8</int>
+     <int>9</int>
     </ports>
-    <name>b</name>
+    <bookmark>false</bookmark>
     <init>rand(5)</init>
     <slider>
      <stepRel>false</stepRel>
+     <visible>true</visible>
      <min>-1</min>
      <max>1</max>
      <step>0.1</step>
     </slider>
-    <csvDataSpec>
-     <dataRowOffset>0</dataRowOffset>
-     <dataColOffset>0</dataColOffset>
-     <separator>,</separator>
-     <quote>&quot;</quote>
-     <escape>\</escape>
-     <decSeparator>.</decSeparator>
-     <mergeDelimiters>false</mergeDelimiters>
-     <columnar>false</columnar>
-     <missingValue>NaN</missingValue>
-     <headerRow>0</headerRow>
-     <horizontalDimName>?</horizontalDimName>
-     <horizontalDimension>
-      <type>string</type>
-      <units></units>
-     </horizontalDimension>
-     <duplicateKeyAction>throwException</duplicateKeyAction>
-     <dimensionCols>
-     </dimensionCols>
-     <dimensions>
-     </dimensions>
-     <dimensionNames>
-     </dimensionNames>
-    </csvDataSpec>
+    <miniPlot>false</miniPlot>
     <tensorData>
-<![CDATA[GhQY=J,mu[C<trm~Bi1n>V%_fFPhQI#Hp_FJ).Hg-oR\H_<.`q/qMRHLCA(S6^9G~U<s/R8:VFIF20'o%);k_2al[FU%+,ipa/g$!6OmR5Q]]>    </tensorData>
+<![CDATA[GhQY=J,mu[C<trm~Bi1n>V%_fFPhQI#Hp_FJ).Hg-oR\H_<.`q/qMRHLCA(S6^9G~U<s0=$jaWUV)_qHH3RaWiu=`_NR7I?BRCIA*rsHs*'s]]>    </tensorData>
    </Item>
    <Item>
-    <id>11</id>
+    <name>c</name>
+    <xmin>NaN</xmin>
+    <xmax>NaN</xmax>
+    <ymin>NaN</ymin>
+    <ymax>NaN</ymax>
+    <y1min>NaN</y1min>
+    <y1max>NaN</y1max>
+    <symbolEvery>1</symbolEvery>
+    <id>10</id>
     <type>Variable:parameter</type>
     <x>147</x>
     <y>197</y>
@@ -197,43 +189,28 @@
     <width>0</width>
     <height>0</height>
     <ports>
-     <int>10</int>
+     <int>11</int>
     </ports>
-    <name>c</name>
+    <bookmark>false</bookmark>
     <init>one(5)</init>
     <slider>
      <stepRel>false</stepRel>
+     <visible>true</visible>
      <min>-1</min>
      <max>1</max>
      <step>0.1</step>
     </slider>
-    <csvDataSpec>
-     <dataRowOffset>0</dataRowOffset>
-     <dataColOffset>0</dataColOffset>
-     <separator>,</separator>
-     <quote>&quot;</quote>
-     <escape>\</escape>
-     <decSeparator>.</decSeparator>
-     <mergeDelimiters>false</mergeDelimiters>
-     <columnar>false</columnar>
-     <missingValue>NaN</missingValue>
-     <headerRow>0</headerRow>
-     <horizontalDimName>?</horizontalDimName>
-     <horizontalDimension>
-      <type>string</type>
-      <units></units>
-     </horizontalDimension>
-     <duplicateKeyAction>throwException</duplicateKeyAction>
-     <dimensionCols>
-     </dimensionCols>
-     <dimensions>
-     </dimensions>
-     <dimensionNames>
-     </dimensionNames>
-    </csvDataSpec>
+    <miniPlot>false</miniPlot>
    </Item>
    <Item>
-    <id>13</id>
+    <xmin>NaN</xmin>
+    <xmax>NaN</xmax>
+    <ymin>NaN</ymin>
+    <ymax>NaN</ymax>
+    <y1min>NaN</y1min>
+    <y1max>NaN</y1max>
+    <symbolEvery>1</symbolEvery>
+    <id>12</id>
     <type>Operation:time</type>
     <x>217</x>
     <y>29</y>
@@ -244,12 +221,134 @@
     <width>0</width>
     <height>0</height>
     <ports>
-     <int>12</int>
+     <int>13</int>
     </ports>
+    <bookmark>false</bookmark>
+    <miniPlot>false</miniPlot>
     <arg>1</arg>
    </Item>
    <Item>
-    <id>36</id>
+    <logx>false</logx>
+    <logy>false</logy>
+    <ypercent>false</ypercent>
+    <grid>true</grid>
+    <subgrid>false</subgrid>
+    <plotType>line</plotType>
+    <nxTicks>10</nxTicks>
+    <nyTicks>10</nyTicks>
+    <xtickAngle>-45</xtickAngle>
+    <exp_threshold>4</exp_threshold>
+    <xmin>NaN</xmin>
+    <xmax>NaN</xmax>
+    <ymin>NaN</ymin>
+    <ymax>NaN</ymax>
+    <y1min>NaN</y1min>
+    <y1max>NaN</y1max>
+    <symbolEvery>1</symbolEvery>
+    <legendGeometry>
+     <legendLeft>0.1</legendLeft>
+     <legendTop>0.95</legendTop>
+     <legendFontSz>0.03</legendFontSz>
+    </legendGeometry>
+    <palette>
+     <LineStyle>
+      <colour>
+       <r>0</r>
+       <g>0</g>
+       <b>0</b>
+       <a>1</a>
+      </colour>
+      <width>1</width>
+      <barWidth>1.5</barWidth>
+      <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
+     </LineStyle>
+     <LineStyle>
+      <colour>
+       <r>1</r>
+       <g>0</g>
+       <b>0</b>
+       <a>1</a>
+      </colour>
+      <width>1</width>
+      <barWidth>1.5</barWidth>
+      <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
+     </LineStyle>
+     <LineStyle>
+      <colour>
+       <r>0</r>
+       <g>0.6</g>
+       <b>0</b>
+       <a>1</a>
+      </colour>
+      <width>1</width>
+      <barWidth>1.5</barWidth>
+      <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
+     </LineStyle>
+     <LineStyle>
+      <colour>
+       <r>0</r>
+       <g>0</g>
+       <b>1</b>
+       <a>1</a>
+      </colour>
+      <width>1</width>
+      <barWidth>1.5</barWidth>
+      <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
+     </LineStyle>
+     <LineStyle>
+      <colour>
+       <r>1</r>
+       <g>0</g>
+       <b>1</b>
+       <a>1</a>
+      </colour>
+      <width>1</width>
+      <barWidth>1.5</barWidth>
+      <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
+     </LineStyle>
+     <LineStyle>
+      <colour>
+       <r>0</r>
+       <g>1</g>
+       <b>1</b>
+       <a>1</a>
+      </colour>
+      <width>1</width>
+      <barWidth>1.5</barWidth>
+      <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
+     </LineStyle>
+     <LineStyle>
+      <colour>
+       <r>1</r>
+       <g>0.647</g>
+       <b>0</b>
+       <a>1</a>
+      </colour>
+      <width>1</width>
+      <barWidth>1.5</barWidth>
+      <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
+     </LineStyle>
+     <LineStyle>
+      <colour>
+       <r>0.627</r>
+       <g>0.125</g>
+       <b>0.941</b>
+       <a>1</a>
+      </colour>
+      <width>1</width>
+      <barWidth>1.5</barWidth>
+      <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
+     </LineStyle>
+    </palette>
+    <id>14</id>
     <type>PlotWidget</type>
     <x>815.75</x>
     <y>297.75</y>
@@ -260,7 +359,6 @@
     <width>800</width>
     <height>436</height>
     <ports>
-     <int>14</int>
      <int>15</int>
      <int>16</int>
      <int>17</int>
@@ -282,16 +380,390 @@
      <int>33</int>
      <int>34</int>
      <int>35</int>
+     <int>36</int>
     </ports>
+    <bookmark>false</bookmark>
+    <miniPlot>false</miniPlot>
+    <palette>
+     <LineStyle>
+      <colour>
+       <r>0</r>
+       <g>0</g>
+       <b>0</b>
+       <a>1</a>
+      </colour>
+      <width>1</width>
+      <barWidth>1.5</barWidth>
+      <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
+     </LineStyle>
+     <LineStyle>
+      <colour>
+       <r>1</r>
+       <g>0</g>
+       <b>0</b>
+       <a>1</a>
+      </colour>
+      <width>1</width>
+      <barWidth>1.5</barWidth>
+      <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
+     </LineStyle>
+     <LineStyle>
+      <colour>
+       <r>0</r>
+       <g>0.6</g>
+       <b>0</b>
+       <a>1</a>
+      </colour>
+      <width>1</width>
+      <barWidth>1.5</barWidth>
+      <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
+     </LineStyle>
+     <LineStyle>
+      <colour>
+       <r>0</r>
+       <g>0</g>
+       <b>1</b>
+       <a>1</a>
+      </colour>
+      <width>1</width>
+      <barWidth>1.5</barWidth>
+      <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
+     </LineStyle>
+     <LineStyle>
+      <colour>
+       <r>1</r>
+       <g>0</g>
+       <b>1</b>
+       <a>1</a>
+      </colour>
+      <width>1</width>
+      <barWidth>1.5</barWidth>
+      <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
+     </LineStyle>
+     <LineStyle>
+      <colour>
+       <r>0</r>
+       <g>1</g>
+       <b>1</b>
+       <a>1</a>
+      </colour>
+      <width>1</width>
+      <barWidth>1.5</barWidth>
+      <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
+     </LineStyle>
+     <LineStyle>
+      <colour>
+       <r>1</r>
+       <g>0.647</g>
+       <b>0</b>
+       <a>1</a>
+      </colour>
+      <width>1</width>
+      <barWidth>1.5</barWidth>
+      <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
+     </LineStyle>
+     <LineStyle>
+      <colour>
+       <r>0.627</r>
+       <g>0.125</g>
+       <b>0.941</b>
+       <a>1</a>
+      </colour>
+      <width>1</width>
+      <barWidth>1.5</barWidth>
+      <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
+     </LineStyle>
+    </palette>
+   </Item>
+   <Item>
+    <name>iota(5)</name>
+    <xmin>NaN</xmin>
+    <xmax>NaN</xmax>
+    <ymin>NaN</ymin>
+    <ymax>NaN</ymax>
+    <y1min>NaN</y1min>
+    <y1max>NaN</y1max>
+    <symbolEvery>1</symbolEvery>
+    <id>37</id>
+    <type>Variable:parameter</type>
+    <x>283</x>
+    <y>725</y>
+    <itemTabX>NaN</itemTabX>
+    <itemTabY>NaN</itemTabY>
+    <scaleFactor>1</scaleFactor>
+    <rotation>0</rotation>
+    <width>0</width>
+    <height>0</height>
+    <ports>
+     <int>38</int>
+    </ports>
+    <bookmark>false</bookmark>
+    <init>iota(5)</init>
+    <slider>
+     <stepRel>false</stepRel>
+     <visible>true</visible>
+     <min>-1</min>
+     <max>1</max>
+     <step>0.1</step>
+    </slider>
+    <miniPlot>false</miniPlot>
+   </Item>
+   <Item>
+    <xmin>NaN</xmin>
+    <xmax>NaN</xmax>
+    <ymin>NaN</ymin>
+    <ymax>NaN</ymax>
+    <y1min>NaN</y1min>
+    <y1max>NaN</y1max>
+    <symbolEvery>1</symbolEvery>
+    <id>39</id>
+    <type>Operation:time</type>
+    <x>268</x>
+    <y>666</y>
+    <itemTabX>NaN</itemTabX>
+    <itemTabY>NaN</itemTabY>
+    <scaleFactor>1</scaleFactor>
+    <rotation>0</rotation>
+    <width>0</width>
+    <height>0</height>
+    <ports>
+     <int>40</int>
+    </ports>
+    <bookmark>false</bookmark>
+    <miniPlot>false</miniPlot>
+    <arg>1</arg>
+   </Item>
+   <Item>
+    <xmin>NaN</xmin>
+    <xmax>NaN</xmax>
+    <ymin>NaN</ymin>
+    <ymax>NaN</ymax>
+    <y1min>NaN</y1min>
+    <y1max>NaN</y1max>
+    <symbolEvery>1</symbolEvery>
+    <id>41</id>
+    <type>Operation:multiply</type>
+    <x>415</x>
+    <y>686</y>
+    <itemTabX>NaN</itemTabX>
+    <itemTabY>NaN</itemTabY>
+    <scaleFactor>1</scaleFactor>
+    <rotation>0</rotation>
+    <width>0</width>
+    <height>0</height>
+    <ports>
+     <int>42</int>
+     <int>43</int>
+     <int>44</int>
+    </ports>
+    <bookmark>false</bookmark>
+    <miniPlot>false</miniPlot>
+    <arg>1</arg>
+   </Item>
+   <Item>
+    <detailedText>tensor&#32;input</detailedText>
+    <xmin>NaN</xmin>
+    <xmax>NaN</xmax>
+    <ymin>NaN</ymin>
+    <ymax>NaN</ymax>
+    <y1min>NaN</y1min>
+    <y1max>NaN</y1max>
+    <symbolEvery>1</symbolEvery>
+    <id>45</id>
+    <type>SwitchIcon</type>
+    <x>453</x>
+    <y>837</y>
+    <itemTabX>NaN</itemTabX>
+    <itemTabY>NaN</itemTabY>
+    <scaleFactor>1</scaleFactor>
+    <rotation>0</rotation>
+    <width>26.4</width>
+    <height>26.4</height>
+    <ports>
+     <int>46</int>
+     <int>47</int>
+     <int>48</int>
+     <int>49</int>
+     <int>50</int>
+    </ports>
+    <bookmark>false</bookmark>
+    <miniPlot>false</miniPlot>
+   </Item>
+   <Item>
+    <name>a</name>
+    <xmin>NaN</xmin>
+    <xmax>NaN</xmax>
+    <ymin>NaN</ymin>
+    <ymax>NaN</ymax>
+    <y1min>NaN</y1min>
+    <y1max>NaN</y1max>
+    <symbolEvery>1</symbolEvery>
+    <id>51</id>
+    <type>Variable:parameter</type>
+    <x>344</x>
+    <y>805</y>
+    <itemTabX>NaN</itemTabX>
+    <itemTabY>NaN</itemTabY>
+    <scaleFactor>1</scaleFactor>
+    <rotation>0</rotation>
+    <width>0</width>
+    <height>0</height>
+    <ports>
+     <int>52</int>
+    </ports>
+    <bookmark>false</bookmark>
+    <init>iota(5)</init>
+    <slider>
+     <stepRel>false</stepRel>
+     <visible>true</visible>
+     <min>-1</min>
+     <max>1</max>
+     <step>0.1</step>
+    </slider>
+    <miniPlot>false</miniPlot>
+   </Item>
+   <Item>
+    <name>b</name>
+    <xmin>NaN</xmin>
+    <xmax>NaN</xmax>
+    <ymin>NaN</ymin>
+    <ymax>NaN</ymax>
+    <y1min>NaN</y1min>
+    <y1max>NaN</y1max>
+    <symbolEvery>1</symbolEvery>
+    <id>53</id>
+    <type>Variable:parameter</type>
+    <x>344</x>
+    <y>845</y>
+    <itemTabX>NaN</itemTabX>
+    <itemTabY>NaN</itemTabY>
+    <scaleFactor>1</scaleFactor>
+    <rotation>0</rotation>
+    <width>0</width>
+    <height>0</height>
+    <ports>
+     <int>54</int>
+    </ports>
+    <bookmark>false</bookmark>
+    <init>rand(5)</init>
+    <slider>
+     <stepRel>false</stepRel>
+     <visible>true</visible>
+     <min>-1</min>
+     <max>1</max>
+     <step>0.1</step>
+    </slider>
+    <miniPlot>false</miniPlot>
+    <tensorData>
+<![CDATA[GhQY=J,mu[C<trm~Bi1n>V%_fFPhQI#Hp_FJ).Hg-oR\H_<.`q/qMRHLCA(S6^9G~U<s0=$jaWUV)_qHH3RaWiu=`_NR7I?BRCIA*rsHs*'s]]>    </tensorData>
+   </Item>
+   <Item>
+    <name>c</name>
+    <xmin>NaN</xmin>
+    <xmax>NaN</xmax>
+    <ymin>NaN</ymin>
+    <ymax>NaN</ymax>
+    <y1min>NaN</y1min>
+    <y1max>NaN</y1max>
+    <symbolEvery>1</symbolEvery>
+    <id>55</id>
+    <type>Variable:parameter</type>
+    <x>342</x>
+    <y>891</y>
+    <itemTabX>NaN</itemTabX>
+    <itemTabY>NaN</itemTabY>
+    <scaleFactor>1</scaleFactor>
+    <rotation>0</rotation>
+    <width>0</width>
+    <height>0</height>
+    <ports>
+     <int>56</int>
+    </ports>
+    <bookmark>false</bookmark>
+    <init>one(5)</init>
+    <slider>
+     <stepRel>false</stepRel>
+     <visible>true</visible>
+     <min>-1</min>
+     <max>1</max>
+     <step>0.1</step>
+    </slider>
+    <miniPlot>false</miniPlot>
+   </Item>
+   <Item>
+    <detailedText>Tensor&#32;switch&#32;with&#32;scalar&#32;selector</detailedText>
+    <xmin>NaN</xmin>
+    <xmax>NaN</xmax>
+    <ymin>NaN</ymin>
+    <ymax>NaN</ymax>
+    <y1min>NaN</y1min>
+    <y1max>NaN</y1max>
+    <symbolEvery>1</symbolEvery>
+    <id>57</id>
+    <type>Item</type>
+    <x>263</x>
+    <y>254</y>
+    <itemTabX>NaN</itemTabX>
+    <itemTabY>NaN</itemTabY>
+    <scaleFactor>1</scaleFactor>
+    <rotation>0</rotation>
+    <width>0</width>
+    <height>0</height>
+    <ports>
+    </ports>
+    <bookmark>false</bookmark>
+    <miniPlot>false</miniPlot>
+   </Item>
+   <Item>
+    <detailedText>Tensor&#32;switch&#32;with&#32;tensor&#32;selector</detailedText>
+    <xmin>NaN</xmin>
+    <xmax>NaN</xmax>
+    <ymin>NaN</ymin>
+    <ymax>NaN</ymax>
+    <y1min>NaN</y1min>
+    <y1max>NaN</y1max>
+    <symbolEvery>1</symbolEvery>
+    <id>58</id>
+    <type>Item</type>
+    <x>539</x>
+    <y>655</y>
+    <itemTabX>NaN</itemTabX>
+    <itemTabY>NaN</itemTabY>
+    <scaleFactor>1</scaleFactor>
+    <rotation>0</rotation>
+    <width>0</width>
+    <height>0</height>
+    <ports>
+    </ports>
+    <bookmark>false</bookmark>
+    <miniPlot>false</miniPlot>
+   </Item>
+   <Item>
     <logx>false</logx>
     <logy>false</logy>
     <ypercent>false</ypercent>
-    <plotTabDisplay>true</plotTabDisplay>
+    <grid>true</grid>
+    <subgrid>false</subgrid>
     <plotType>line</plotType>
     <nxTicks>10</nxTicks>
     <nyTicks>10</nyTicks>
     <xtickAngle>-45</xtickAngle>
     <exp_threshold>4</exp_threshold>
+    <xmin>NaN</xmin>
+    <xmax>NaN</xmax>
+    <ymin>NaN</ymin>
+    <ymax>NaN</ymax>
+    <y1min>NaN</y1min>
+    <y1max>NaN</y1max>
+    <symbolEvery>1</symbolEvery>
     <legendGeometry>
      <legendLeft>0.1</legendLeft>
      <legendTop>0.95</legendTop>
@@ -306,7 +778,9 @@
        <a>1</a>
       </colour>
       <width>1</width>
+      <barWidth>1.5</barWidth>
       <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
      </LineStyle>
      <LineStyle>
       <colour>
@@ -316,7 +790,9 @@
        <a>1</a>
       </colour>
       <width>1</width>
+      <barWidth>1.5</barWidth>
       <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
      </LineStyle>
      <LineStyle>
       <colour>
@@ -326,7 +802,9 @@
        <a>1</a>
       </colour>
       <width>1</width>
+      <barWidth>1.5</barWidth>
       <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
      </LineStyle>
      <LineStyle>
       <colour>
@@ -336,7 +814,9 @@
        <a>1</a>
       </colour>
       <width>1</width>
+      <barWidth>1.5</barWidth>
       <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
      </LineStyle>
      <LineStyle>
       <colour>
@@ -346,7 +826,9 @@
        <a>1</a>
       </colour>
       <width>1</width>
+      <barWidth>1.5</barWidth>
       <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
      </LineStyle>
      <LineStyle>
       <colour>
@@ -356,7 +838,9 @@
        <a>1</a>
       </colour>
       <width>1</width>
+      <barWidth>1.5</barWidth>
       <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
      </LineStyle>
      <LineStyle>
       <colour>
@@ -366,7 +850,9 @@
        <a>1</a>
       </colour>
       <width>1</width>
+      <barWidth>1.5</barWidth>
       <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
      </LineStyle>
      <LineStyle>
       <colour>
@@ -376,286 +862,12 @@
        <a>1</a>
       </colour>
       <width>1</width>
+      <barWidth>1.5</barWidth>
       <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
      </LineStyle>
     </palette>
-   </Item>
-   <Item>
-    <id>38</id>
-    <type>Variable:parameter</type>
-    <x>283</x>
-    <y>725</y>
-    <itemTabX>NaN</itemTabX>
-    <itemTabY>NaN</itemTabY>
-    <scaleFactor>1</scaleFactor>
-    <rotation>0</rotation>
-    <width>0</width>
-    <height>0</height>
-    <ports>
-     <int>37</int>
-    </ports>
-    <name>iota(5)</name>
-    <init>iota(5)</init>
-    <slider>
-     <stepRel>false</stepRel>
-     <min>-1</min>
-     <max>1</max>
-     <step>0.1</step>
-    </slider>
-    <csvDataSpec>
-     <dataRowOffset>0</dataRowOffset>
-     <dataColOffset>0</dataColOffset>
-     <separator>,</separator>
-     <quote>&quot;</quote>
-     <escape>\</escape>
-     <decSeparator>.</decSeparator>
-     <mergeDelimiters>false</mergeDelimiters>
-     <columnar>false</columnar>
-     <missingValue>NaN</missingValue>
-     <headerRow>0</headerRow>
-     <horizontalDimName>?</horizontalDimName>
-     <horizontalDimension>
-      <type>string</type>
-      <units></units>
-     </horizontalDimension>
-     <duplicateKeyAction>throwException</duplicateKeyAction>
-     <dimensionCols>
-     </dimensionCols>
-     <dimensions>
-     </dimensions>
-     <dimensionNames>
-     </dimensionNames>
-    </csvDataSpec>
-   </Item>
-   <Item>
-    <id>40</id>
-    <type>Operation:time</type>
-    <x>268</x>
-    <y>666</y>
-    <itemTabX>NaN</itemTabX>
-    <itemTabY>NaN</itemTabY>
-    <scaleFactor>1</scaleFactor>
-    <rotation>0</rotation>
-    <width>0</width>
-    <height>0</height>
-    <ports>
-     <int>39</int>
-    </ports>
-    <arg>1</arg>
-   </Item>
-   <Item>
-    <id>44</id>
-    <type>Operation:multiply</type>
-    <x>415</x>
-    <y>686</y>
-    <itemTabX>NaN</itemTabX>
-    <itemTabY>NaN</itemTabY>
-    <scaleFactor>1</scaleFactor>
-    <rotation>0</rotation>
-    <width>0</width>
-    <height>0</height>
-    <ports>
-     <int>41</int>
-     <int>42</int>
-     <int>43</int>
-    </ports>
-    <arg>1</arg>
-   </Item>
-   <Item>
-    <detailedText>tensor&#32;input</detailedText>
-    <id>50</id>
-    <type>SwitchIcon</type>
-    <x>453</x>
-    <y>837</y>
-    <itemTabX>NaN</itemTabX>
-    <itemTabY>NaN</itemTabY>
-    <scaleFactor>1</scaleFactor>
-    <rotation>0</rotation>
-    <width>24</width>
-    <height>24</height>
-    <ports>
-     <int>45</int>
-     <int>46</int>
-     <int>47</int>
-     <int>48</int>
-     <int>49</int>
-    </ports>
-   </Item>
-   <Item>
-    <id>52</id>
-    <type>Variable:parameter</type>
-    <x>344</x>
-    <y>805</y>
-    <itemTabX>NaN</itemTabX>
-    <itemTabY>NaN</itemTabY>
-    <scaleFactor>1</scaleFactor>
-    <rotation>0</rotation>
-    <width>0</width>
-    <height>0</height>
-    <ports>
-     <int>51</int>
-    </ports>
-    <name>a</name>
-    <init>iota(5)</init>
-    <slider>
-     <stepRel>false</stepRel>
-     <min>-1</min>
-     <max>1</max>
-     <step>0.1</step>
-    </slider>
-    <csvDataSpec>
-     <dataRowOffset>0</dataRowOffset>
-     <dataColOffset>0</dataColOffset>
-     <separator>,</separator>
-     <quote>&quot;</quote>
-     <escape>\</escape>
-     <decSeparator>.</decSeparator>
-     <mergeDelimiters>false</mergeDelimiters>
-     <columnar>false</columnar>
-     <missingValue>NaN</missingValue>
-     <headerRow>0</headerRow>
-     <horizontalDimName>?</horizontalDimName>
-     <horizontalDimension>
-      <type>string</type>
-      <units></units>
-     </horizontalDimension>
-     <duplicateKeyAction>throwException</duplicateKeyAction>
-     <dimensionCols>
-     </dimensionCols>
-     <dimensions>
-     </dimensions>
-     <dimensionNames>
-     </dimensionNames>
-    </csvDataSpec>
-   </Item>
-   <Item>
-    <id>54</id>
-    <type>Variable:parameter</type>
-    <x>344</x>
-    <y>845</y>
-    <itemTabX>NaN</itemTabX>
-    <itemTabY>NaN</itemTabY>
-    <scaleFactor>1</scaleFactor>
-    <rotation>0</rotation>
-    <width>0</width>
-    <height>0</height>
-    <ports>
-     <int>53</int>
-    </ports>
-    <name>b</name>
-    <init>rand(5)</init>
-    <slider>
-     <stepRel>false</stepRel>
-     <min>-1</min>
-     <max>1</max>
-     <step>0.1</step>
-    </slider>
-    <csvDataSpec>
-     <dataRowOffset>0</dataRowOffset>
-     <dataColOffset>0</dataColOffset>
-     <separator>,</separator>
-     <quote>&quot;</quote>
-     <escape>\</escape>
-     <decSeparator>.</decSeparator>
-     <mergeDelimiters>false</mergeDelimiters>
-     <columnar>false</columnar>
-     <missingValue>NaN</missingValue>
-     <headerRow>0</headerRow>
-     <horizontalDimName>?</horizontalDimName>
-     <horizontalDimension>
-      <type>string</type>
-      <units></units>
-     </horizontalDimension>
-     <duplicateKeyAction>throwException</duplicateKeyAction>
-     <dimensionCols>
-     </dimensionCols>
-     <dimensions>
-     </dimensions>
-     <dimensionNames>
-     </dimensionNames>
-    </csvDataSpec>
-    <tensorData>
-<![CDATA[GhQY=J,mu[C<trm~Bi1n>V%_fFPhQI#Hp_FJ).Hg-oR\H_<.`q/qMRHLCA(S6^9G~U<s/R8:VFIF20'o%);k_2al[FU%+,ipa/g$!6OmR5Q]]>    </tensorData>
-   </Item>
-   <Item>
-    <id>56</id>
-    <type>Variable:parameter</type>
-    <x>342</x>
-    <y>891</y>
-    <itemTabX>NaN</itemTabX>
-    <itemTabY>NaN</itemTabY>
-    <scaleFactor>1</scaleFactor>
-    <rotation>0</rotation>
-    <width>0</width>
-    <height>0</height>
-    <ports>
-     <int>55</int>
-    </ports>
-    <name>c</name>
-    <init>one(5)</init>
-    <slider>
-     <stepRel>false</stepRel>
-     <min>-1</min>
-     <max>1</max>
-     <step>0.1</step>
-    </slider>
-    <csvDataSpec>
-     <dataRowOffset>0</dataRowOffset>
-     <dataColOffset>0</dataColOffset>
-     <separator>,</separator>
-     <quote>&quot;</quote>
-     <escape>\</escape>
-     <decSeparator>.</decSeparator>
-     <mergeDelimiters>false</mergeDelimiters>
-     <columnar>false</columnar>
-     <missingValue>NaN</missingValue>
-     <headerRow>0</headerRow>
-     <horizontalDimName>?</horizontalDimName>
-     <horizontalDimension>
-      <type>string</type>
-      <units></units>
-     </horizontalDimension>
-     <duplicateKeyAction>throwException</duplicateKeyAction>
-     <dimensionCols>
-     </dimensionCols>
-     <dimensions>
-     </dimensions>
-     <dimensionNames>
-     </dimensionNames>
-    </csvDataSpec>
-   </Item>
-   <Item>
-    <detailedText>Tensor&#32;switch&#32;with&#32;scalar&#32;selector</detailedText>
-    <id>57</id>
-    <type>Item</type>
-    <x>263</x>
-    <y>254</y>
-    <itemTabX>NaN</itemTabX>
-    <itemTabY>NaN</itemTabY>
-    <scaleFactor>1</scaleFactor>
-    <rotation>0</rotation>
-    <width>0</width>
-    <height>0</height>
-    <ports>
-    </ports>
-   </Item>
-   <Item>
-    <detailedText>Tensor&#32;switch&#32;with&#32;tensor&#32;selector</detailedText>
-    <id>58</id>
-    <type>Item</type>
-    <x>539</x>
-    <y>655</y>
-    <itemTabX>NaN</itemTabX>
-    <itemTabY>NaN</itemTabY>
-    <scaleFactor>1</scaleFactor>
-    <rotation>0</rotation>
-    <width>0</width>
-    <height>0</height>
-    <ports>
-    </ports>
-   </Item>
-   <Item>
-    <id>81</id>
+    <id>59</id>
     <type>PlotWidget</type>
     <x>919.25</x>
     <y>894.75</y>
@@ -666,7 +878,6 @@
     <width>517</width>
     <height>194</height>
     <ports>
-     <int>59</int>
      <int>60</int>
      <int>61</int>
      <int>62</int>
@@ -688,21 +899,10 @@
      <int>78</int>
      <int>79</int>
      <int>80</int>
+     <int>81</int>
     </ports>
-    <logx>false</logx>
-    <logy>false</logy>
-    <ypercent>false</ypercent>
-    <plotTabDisplay>true</plotTabDisplay>
-    <plotType>line</plotType>
-    <nxTicks>10</nxTicks>
-    <nyTicks>10</nyTicks>
-    <xtickAngle>-45</xtickAngle>
-    <exp_threshold>4</exp_threshold>
-    <legendGeometry>
-     <legendLeft>0.1</legendLeft>
-     <legendTop>0.95</legendTop>
-     <legendFontSz>0.03</legendFontSz>
-    </legendGeometry>
+    <bookmark>false</bookmark>
+    <miniPlot>false</miniPlot>
     <palette>
      <LineStyle>
       <colour>
@@ -712,7 +912,9 @@
        <a>1</a>
       </colour>
       <width>1</width>
+      <barWidth>1.5</barWidth>
       <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
      </LineStyle>
      <LineStyle>
       <colour>
@@ -722,7 +924,9 @@
        <a>1</a>
       </colour>
       <width>1</width>
+      <barWidth>1.5</barWidth>
       <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
      </LineStyle>
      <LineStyle>
       <colour>
@@ -732,7 +936,9 @@
        <a>1</a>
       </colour>
       <width>1</width>
+      <barWidth>1.5</barWidth>
       <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
      </LineStyle>
      <LineStyle>
       <colour>
@@ -742,7 +948,9 @@
        <a>1</a>
       </colour>
       <width>1</width>
+      <barWidth>1.5</barWidth>
       <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
      </LineStyle>
      <LineStyle>
       <colour>
@@ -752,7 +960,9 @@
        <a>1</a>
       </colour>
       <width>1</width>
+      <barWidth>1.5</barWidth>
       <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
      </LineStyle>
      <LineStyle>
       <colour>
@@ -762,7 +972,9 @@
        <a>1</a>
       </colour>
       <width>1</width>
+      <barWidth>1.5</barWidth>
       <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
      </LineStyle>
      <LineStyle>
       <colour>
@@ -772,7 +984,9 @@
        <a>1</a>
       </colour>
       <width>1</width>
+      <barWidth>1.5</barWidth>
       <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
      </LineStyle>
      <LineStyle>
       <colour>
@@ -782,12 +996,21 @@
        <a>1</a>
       </colour>
       <width>1</width>
+      <barWidth>1.5</barWidth>
       <dashStyle>solid</dashStyle>
+      <plotType>line</plotType>
      </LineStyle>
     </palette>
    </Item>
    <Item>
-    <id>84</id>
+    <xmin>NaN</xmin>
+    <xmax>NaN</xmax>
+    <ymin>NaN</ymin>
+    <ymax>NaN</ymax>
+    <y1min>NaN</y1min>
+    <y1max>NaN</y1max>
+    <symbolEvery>1</symbolEvery>
+    <id>82</id>
     <type>Operation:sin</type>
     <x>441</x>
     <y>741</y>
@@ -798,9 +1021,11 @@
     <width>0</width>
     <height>0</height>
     <ports>
-     <int>82</int>
      <int>83</int>
+     <int>84</int>
     </ports>
+    <bookmark>false</bookmark>
+    <miniPlot>false</miniPlot>
     <arg>1</arg>
    </Item>
   </items>
@@ -825,7 +1050,24 @@
   <bookmarks>
   </bookmarks>
   <dimensions>
+   <pair>
+    <first>0</first>
+    <second>
+     <type>value</type>
+     <units></units>
+    </second>
+   </pair>
   </dimensions>
   <conversions>
   </conversions>
+  <phillipsDiagram>
+   <stocks>
+   </stocks>
+   <flows>
+   </flows>
+  </phillipsDiagram>
+  <publicationTabs>
+  </publicationTabs>
+  <publicationItems>
+  </publicationItems>
  </Minsky>

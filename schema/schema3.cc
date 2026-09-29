@@ -1,4 +1,4 @@
-/*
+ /*
   @copyright Steve Keen 2017
   @author Russell Standish
   This file is part of Minsky.
@@ -16,7 +16,10 @@
   You should have received a copy of the GNU General Public License
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
+#include "dataOp.h"
 #include "schema3.h"
+#include "CSVTools.xcd"
+#include "dynamicRavelCAPI.xcd"
 #include "sheet.h"
 #include "userFunction.h"
 #include "minsky_epilogue.h"
@@ -32,6 +35,7 @@ namespace classdesc_access
 
 namespace schema3
 {
+  
   // binary serialisation used to serialise the tensorInit field of
   // variableValues into the minsky schema, fixed off here, rather
   // than classdesc generated to ensure backward compatibility
@@ -102,7 +106,7 @@ namespace schema3
     a.index(std::move(index)); //NOLINT
     a.hypercube(std::move(hc)); //dimension data
     assert(a.size()==data.size());
-    memcpy(a.begin(),&data[0],data.size()*sizeof(data[0]));
+    memcpy(a.begin(),data.data(),data.size()*sizeof(data[0]));
   }
 
   Optional<classdesc::CDATA> Item::convertTensorDataFromSchema2(const Optional<classdesc::CDATA>& x)
@@ -121,17 +125,17 @@ namespace schema3
   }
   
   // map of object to ID, that allocates a new ID on objects not seen before
-  struct IdMap: public map<void*,int>
+  struct IdMap: public map<const void*,int>
   {
     int nextId=0;
     set<minsky::RavelLockGroup*> lockGroups;
-    int at(void* o) {
+    int at(const void* o) {
       auto i=find(o);
       if (i==end())
         return emplace(o,nextId++).first->second;
       return i->second;
     }
-    int operator[](void* o) {return at(o);}
+    int operator[](const void* o) {return at(o);}
     vector<int> at(const minsky::Item& item) {
       vector<int> r;
       for (size_t i=0; i<item.portsSize(); ++i)
@@ -140,13 +144,21 @@ namespace schema3
     }
   
     template <class T>
-    bool emplaceIf(vector<Item>& items, minsky::Item* i)
+    bool emplaceIf(vector<Item>& items, const minsky::Item* i)
     {
-      auto* j=dynamic_cast<T*>(i);
+      auto* j=dynamic_cast<const T*>(i);
       if (j)
         {
+          // do not write invisible unwired GodleyIcon variables to the schema. For #1759.
+          if (auto v=i->variableCast())
+            if (auto g=dynamic_cast<minsky::GodleyIcon*>(v->controller.lock().get()))
+              for (size_t i=0; !g->variableDisplay() && i<2; ++i)
+                if (auto p=v->ports(i).lock())
+                  if (p->wires().empty())
+                    return j;
+          
           items.emplace_back(at(i), *j, at(*j));
-          if (auto* g=dynamic_cast<minsky::GodleyIcon*>(i))
+          if (auto* g=dynamic_cast<const minsky::GodleyIcon*>(i))
             {
               // insert port references from flow/stock vars
               items.back().ports.clear();
@@ -155,17 +167,22 @@ namespace schema3
               for (const auto& v: g->stockVars())
                 items.back().ports.push_back(at(v->ports(0).lock().get()));
             }
-          if (auto* d=dynamic_cast<minsky::DataOp*>(i))
+          if (auto* d=dynamic_cast<const minsky::DataOp*>(i))
             {
               items.back().dataOpData=d->data;
               items.back().name=d->description();
             }
-          if (auto* d=dynamic_cast<minsky::UserFunction*>(i))
+          if (auto* s=dynamic_cast<const minsky::Sheet*>(i))
+            {
+              items.back().showSlice=s->showRowSlice;
+              items.back().showColSlice=s->showColSlice;
+            }
+          if (auto* d=dynamic_cast<const minsky::UserFunction*>(i))
             {
               items.back().expression=d->expression;
               items.back().name=d->description();
             }
-          if (auto* r=dynamic_cast<minsky::Ravel*>(i))
+          if (auto* r=dynamic_cast<const minsky::Ravel*>(i))
             {
               if (r->lockGroup)
                 lockGroups.insert(r->lockGroup.get());
@@ -174,9 +191,14 @@ namespace schema3
                 {
                   items.back().ravelState=s;
                   items.back().dimensions=r->axisDimensions;
+                  items.back().editorMode=r->editorMode();
                 }
+              if (r->flipped) items.back().rotation=180;
+              auto dbConnection=r->db.connection();
+              if (!dbConnection.dbType.empty())
+                items.back().dbConnection=dbConnection;
             }
-          if (auto* l=dynamic_cast<minsky::Lock*>(i))
+          if (auto* l=dynamic_cast<const minsky::Lock*>(i))
             if (l->locked())
               items.back().ravelState=l->lockedState;
         }
@@ -188,7 +210,7 @@ namespace schema3
   {
     inline bool matchesStart(const string& x, const string& y)
     {
-      size_t n=min(x.length(),y.length());
+      const size_t n=min(x.length(),y.length());
       return x.substr(0,n)==y.substr(0,n);
     }
   }
@@ -223,6 +245,8 @@ namespace schema3
     // override here for special handling of Operations and Variables
     minsky::Item* create(const string& t) const
     {
+      if (t=="Operation:rho") // handle legacy names after operation rename
+        return minsky::OperationBase::create(minsky::OperationType::correlation); 
       if (matchesStart(t,"Operation:"))
         return minsky::OperationBase::create
           (enum_keys<minsky::OperationType::Type>()
@@ -274,10 +298,23 @@ namespace schema3
         }
   }
 
+  struct MinskyImpl
+  {
+    IdMap itemMap, pubItemMap;                            // for serialisation
+    map<int, minsky::ItemPtr> reverseItemMap; // for deserialisation
+  };
+
+  void Minsky::makeImpl()
+  {
+    impl=make_shared<MinskyImpl>();
+  }
+  
+  Minsky::~Minsky()=default; // required because of Pimpl pattern
 
   Minsky::Minsky(const minsky::Group& g, bool packTensorData)
   {
-    IdMap itemMap;
+    makeImpl();
+    auto& itemMap=impl->itemMap;
 
     g.recursiveDo(&minsky::GroupItems::items,[&](const minsky::Items&,minsky::Items::const_iterator i) {
         itemMap.emplaceIf<minsky::Ravel>(items, i->get()) ||
@@ -295,12 +332,21 @@ namespace schema3
 
         return false;
       });
+
+    // add any I/O variables
+    vector<int> inVars, outVars;
+    for (auto& i: g.inVariables)
+      inVars.push_back(itemMap[i.get()]);
+    for (auto& i: g.outVariables)
+      outVars.push_back(itemMap[i.get()]);
+    inVariables=inVars;
+    outVariables=outVars;
     
     // search for and link up integrals to their variables, and Godley table ports
     g.recursiveDo(&minsky::GroupItems::items,[&](const minsky::Items&,minsky::Items::const_iterator i) {
         if (auto* integ=dynamic_cast<minsky::IntOp*>(i->get()))
           {
-            int id=itemMap[i->get()];
+            const int id=itemMap[i->get()];
             for (auto& j: items)
               if (j.id==id)
                 {
@@ -329,7 +375,8 @@ namespace schema3
                     groups.emplace_back(itemMap[i->get()], **i);
                     for (auto& j: (*i)->items)
                       {
-                        assert(itemMap.count(j.get()));
+                        // some invisible items are excluded from the schema 
+                        assert(!j->visible() || itemMap.count(j.get()));
                         groups.back().items.push_back(itemMap[j.get()]);
                         if (j==(*i)->displayPlot)
                           groups.back().displayPlot=itemMap[j.get()];
@@ -349,6 +396,8 @@ namespace schema3
                     return false;
                   });
 
+    
+    
     // process lock groups
     for (auto lg: itemMap.lockGroups)
       {
@@ -362,27 +411,76 @@ namespace schema3
         for (auto& hli: lg->handleLockInfo)
           slg.handleLockInfo.emplace_back(hli);
       }
+
+    title=g.tooltip();
+    description=g.detailedText();
   }
       
-  Minsky::operator minsky::Minsky() const
+  PhillipsDiagram::PhillipsDiagram(const minsky::PhillipsDiagram& pd)
   {
-    minsky::Minsky m;
-    minsky::LocalMinsky lm(m);
+    IdMap itemMap;
+    for (auto& [key,stock]: pd.stocks)
+      itemMap.emplaceIf<minsky::VariableBase>(stocks, &stock);
+
+    for (auto& [key,flow]: pd.flows)
+      {
+        flows.emplace_back(itemMap[&flow], flow);
+        assert(itemMap.count(flow.from().get()) && itemMap.count(flow.to().get()));
+        flows.back().from=itemMap[flow.from().get()];
+        flows.back().to=itemMap[flow.to().get()];
+        for (auto& term: flow.terms)
+          flows.back().terms.emplace_back(term.first, Item(-1,term.second,{}));
+      }
+  }
+
+  void Minsky::populateSchemaPublicationTabs(const std::vector<minsky::PubTab>& pubTabs)
+  {
+    assert(impl.get());
+    auto& itemMap=impl->itemMap;
+    publicationTabs.clear();
+    if (pubTabs.size()==1 && pubTabs.front().items.empty()) return; // don't bother adding a single empty pub tab
+    for (auto& i: pubTabs)
+      {
+        publicationTabs.emplace_back();
+        publicationTabs.back().name=i.name;
+        for (auto& j: i.items)
+          {
+            // add locally added notes on publication tab to items list in schema
+            if (!itemMap.count(j.itemRef.get()))
+              itemMap.emplaceIf<minsky::Item>(publicationItems,j.itemRef.get());
+            publicationTabs.back().items.emplace_back(itemMap[j.itemRef.get()], j);
+          }
+      }
+  }
+
+  void Minsky::populateMinsky(minsky::Minsky& m) const
+  {
+    const minsky::LocalMinsky lm(m);
+    m.model->clear();
     populateGroup(*m.model);
+    m.model->tooltip(title);
+    m.model->detailedText(description);
+    m.canvas.model=m.model;
+
     m.model->setZoom(zoomFactor);
-    m.model->bookmarks=bookmarks;
+    m.model->bookmarks.insert(bookmarks.begin(), bookmarks.end());
     m.dimensions=dimensions;
     m.conversions=conversions;
     m.fileVersion=minskyVersion;
+    m.author=author;
     
     static_cast<minsky::Simulation&>(m)=rungeKutta;
-    return m;
+
+    phillipsDiagram.populatePhillipsDiagram(m.phillipsDiagram);
+    populatePublicationTabs(m.publicationTabs);
   }
 
   void populateNote(minsky::NoteBase& x, const Note& y)
   {
-    if (y.detailedText) x.detailedText=*y.detailedText;
-    if (y.tooltip) x.tooltip=*y.tooltip;
+    if (y.detailedText && !y.detailedText->empty())
+      x.detailedText(*y.detailedText);
+    if (y.tooltip && !y.tooltip->empty())
+      x.tooltip(*y.tooltip);
   }
 
   void populateItem(minsky::Item& x, const Item& y)
@@ -390,12 +488,11 @@ namespace schema3
     populateNote(x,y);
     x.m_x=y.x;
     x.m_y=y.y;
-    x.itemTabX=y.itemTabX;
-    x.itemTabY=y.itemTabY;
     x.m_sf=y.scaleFactor;
     x.rotation(y.rotation);
     x.iWidth(y.width);
     x.iHeight(y.height);
+    x.bookmark=y.bookmark;
     if (auto* x1=dynamic_cast<minsky::DataOp*>(&x))
       {
         if (y.name)
@@ -413,6 +510,11 @@ namespace schema3
     
     if (auto* x1=dynamic_cast<minsky::Ravel*>(&x))
       {
+        if (y.dbConnection)
+          {
+            x1->db.connect(y.dbConnection->dbType,y.dbConnection->connection,y.dbConnection->table);
+            x1->initRavelFromDb();
+          }
         if (y.ravelState)
           {
             x1->applyState(y.ravelState->toRavelRavelState());
@@ -422,11 +524,17 @@ namespace schema3
         
         if (y.dimensions)
           x1->axisDimensions=*y.dimensions;
+        if (y.editorMode && *y.editorMode!=x1->editorMode())
+          x1->toggleEditorMode();
+        x1->flipped=minsky::flipped(y.rotation);
       }
     if (auto* x1=dynamic_cast<minsky::Lock*>(&x))
       {
         if (y.ravelState)
+          {
             x1->lockedState=y.ravelState->toRavelRavelState();
+            x1->tooltip(ravelCAPI::Ravel::description(x1->lockedState));
+          }
       }
     if (auto* x1=dynamic_cast<minsky::VariableBase*>(&x))
       {
@@ -434,12 +542,13 @@ namespace schema3
           x1->name(*y.name);
         if (y.slider)
           {
-            x1->sliderBoundsSet=true;
-            x1->sliderStepRel=y.slider->stepRel;
-            x1->sliderMin=y.slider->min;
-            x1->sliderMax=y.slider->max;
-            x1->sliderStep=y.slider->step;
+            x1->sliderStepRel(y.slider->stepRel);
+            x1->enableSlider(y.slider->visible);
+            x1->sliderMin(y.slider->min);
+            x1->sliderMax(y.slider->max);
+            x1->sliderStep(y.slider->step);
           }
+        x1->miniPlotEnabled(y.miniPlot);
         // variableValue attributes populated later once variable is homed in its group
       }
     if (auto* x1=dynamic_cast<minsky::OperationBase*>(&x))
@@ -460,41 +569,37 @@ namespace schema3
           }
         catch (const std::exception&) {}
         if (y.name) x1->table.title=*y.name;
-        if (y.editorMode && *y.editorMode!=x1->editorMode())
+        if ((y.editorMode && *y.editorMode!=x1->editorMode()) ||
+            (!y.editorMode && x1->editorMode()) // if legacy, not specified, set as icon
+            )
           x1->toggleEditorMode();
-        if (y.variableDisplay) x1->variableDisplay=*y.variableDisplay;
+        if (y.variableDisplay)
+          SchemaHelper::setVariableDisplay(*x1, *y.variableDisplay);
         if (y.buttonDisplay && *y.buttonDisplay!=x1->buttonDisplay())
           x1->toggleButtons();
+        if (y.displayValues && *y.displayValues!=x1->displayValues)
+          x1->toggleDisplayValues();
+        if (y.currency) x1->currency=*y.currency;
       }
     if (auto* x1=dynamic_cast<minsky::PlotWidget*>(&x))
       {
         x1->bb.update(*x1);        
         if (y.name) x1->title=*y.name;
-        if (y.logx) x1->logx=*y.logx;
-        if (y.logy) x1->logy=*y.logy;
-        if (y.ypercent) x1->percent=*y.ypercent;
-        if (y.plotTabDisplay) x1->plotTabDisplay=*y.plotTabDisplay;
-        if (y.plotType) x1->plotType=*y.plotType;
-        if (y.xlabel) x1->xlabel=*y.xlabel;
-        if (y.ylabel) x1->ylabel=*y.ylabel;
-        if (y.y1label) x1->y1label=*y.y1label;
-        if (y.nxTicks) x1->nxTicks=*y.nxTicks;
-        if (y.nyTicks) x1->nyTicks=*y.nyTicks;
-        if (y.xtickAngle) x1->xtickAngle=*y.xtickAngle;
-        if (y.exp_threshold) x1->exp_threshold=*y.exp_threshold;
-        if (y.legend)
-          {
-            x1->legend=true;
-            x1->legendSide=*y.legend;
-          }
-        if (y.legendGeometry)
-          y.legendGeometry->setLegendGeometry(*x1);
+        y.applyPlotOptions(*x1);
         if (y.palette) x1->palette=*y.palette;
+        if (y.ports.size()>x1->nBoundsPorts)
+          x1->numLines((y.ports.size()-x1->nBoundsPorts)/4);
+      }
+    if (auto* x1=dynamic_cast<minsky::Sheet*>(&x))
+      {
+        if (y.showSlice)
+          x1->showRowSlice=*y.showSlice;
+        if (y.showColSlice)
+          x1->showColSlice=*y.showColSlice;
       }
     if (auto* x1=dynamic_cast<minsky::SwitchIcon*>(&x))
       {
-        auto r=fmod(y.rotation,360);
-        x1->flipped=r>90 && r<270;
+        x1->flipped=minsky::flipped(y.rotation);
         if (y.ports.size()>=2)
           x1->setNumCases(y.ports.size()-2);
       }
@@ -502,7 +607,11 @@ namespace schema3
       {
         x1->bb.update(*x1);
         if (y.name) x1->title=*y.name;
-        if (y.bookmarks) x1->bookmarks=*y.bookmarks;
+        if (y.bookmarks)
+          {
+            x1->bookmarks.clear();
+            x1->bookmarks.insert(y.bookmarks->begin(), y.bookmarks->end());
+          }
       }
   }
 
@@ -518,11 +627,38 @@ namespace schema3
     LockGroupFactory(): shared_ptr<minsky::RavelLockGroup>(new minsky::RavelLockGroup) {}
   };
   
+  void Minsky::populatePublicationTabs(std::vector<minsky::PubTab>& pubTabs) const
+  {
+    assert(impl.get());
+    auto& itemMap=impl->reverseItemMap;
+
+    // add in publication tab only items
+    const MinskyItemFactory factory;
+    for (auto& i: publicationItems)
+      if (auto newItem=itemMap[i.id]=minsky::ItemPtr(factory.create(i.type)))
+        populateItem(*newItem,i);
+    
+    pubTabs.clear();
+    for (auto& pub: publicationTabs)
+      {
+        pubTabs.emplace_back(pub.name);
+        pubTabs.back().offsx=pub.x;
+        pubTabs.back().offsy=pub.y;
+        pubTabs.back().m_zoomFactor=pub.zoomFactor;
+           
+        for (auto& item: pub.items)
+          if (itemMap.contains(item.item))
+            pubTabs.back().items.emplace_back(itemMap[item.item], item);
+      }
+    if (pubTabs.empty()) pubTabs.emplace_back("Publication");
+  }
+  
   void Minsky::populateGroup(minsky::Group& g) const {
-    map<int, minsky::ItemPtr> itemMap;
+    assert(impl.get());
+    auto& itemMap=impl->reverseItemMap;
     map<int, weak_ptr<minsky::Port>> portMap;
     map<int, schema3::Item> schema3VarMap;
-    MinskyItemFactory factory;
+    const MinskyItemFactory factory;
     map<int,LockGroupFactory> lockGroups;
     
     for (const auto& i: items)
@@ -534,6 +670,14 @@ namespace schema3
           if (newItem->variableCast())
             schema3VarMap[i.id]=i;
         }
+
+    if (inVariables)
+      for (auto i: *inVariables)
+        g.inVariables.push_back(itemMap[i]);
+    if (outVariables)
+      for (auto i: *outVariables)
+        g.outVariables.push_back(itemMap[i]);
+
     // second loop over items to wire up integrals, and populate Godley table variables
     for (const auto& i: items)
       {
@@ -545,7 +689,7 @@ namespace schema3
               {
                 assert(integ->intVar);
                 assert(integ->intVar->type()==minsky::VariableType::integral);
-                if (itemMap.count(*i.intVar))
+                if (itemMap.contains(*i.intVar))
                   {
                     if (integ->coupled()) integ->toggleCoupled();
                     g.removeItem(*integ->intVar);
@@ -622,7 +766,7 @@ namespace schema3
       }
     
     for (const auto& w: wires)
-      if (portMap.count(w.to) && portMap.count(w.from))
+      if (portMap.contains(w.to) && portMap.contains(w.from))
         {
           populateWire
             (*g.addWire(new minsky::Wire(portMap[w.from],portMap[w.to])),w);
@@ -689,12 +833,13 @@ namespace schema3
               v->init(*i.second.init);
             if (i.second.units)
               v->setUnits(*i.second.units);
+            populateNote(*v,i.second);
             if (auto val=v->vValue())
               {
                 if (i.second.csvDataSpec)
-                  val->csvDialog.spec=*i.second.csvDataSpec;
+                  val->spec=*i.second.csvDataSpec;
                 if (i.second.url)
-                  val->csvDialog.url=*i.second.url;
+                  val->url=*i.second.url;
                 if (i.second.tensorData)
                   {
                     auto buf=minsky::decode(*i.second.tensorData);
@@ -719,6 +864,36 @@ namespace schema3
                   }
               }
           }
+      }
+  }
+
+  void PhillipsDiagram::populatePhillipsDiagram(minsky::PhillipsDiagram& pd) const
+  {
+    static const MinskyItemFactory itemFactory;
+    map<int, weak_ptr<minsky::Port>> portMap;
+    for (auto& i: stocks)
+      {
+        minsky::PhillipsStock stock;
+        populateItem(stock, i);
+        auto& item=pd.stocks[stock.valueId()]=stock;
+        for (size_t j=0; j<std::min(i.ports.size(), stock.numPorts()); ++j)
+          portMap[i.ports[j]]=item.ports(j);
+      }
+    
+    for (auto& i: flows)
+      {
+        assert(portMap[i.from].lock() && portMap[i.to].lock());
+        minsky::PhillipsFlow flow(portMap[i.from],portMap[i.to]);
+        populateWire(flow, i);
+        for (auto& j: i.terms)
+          {
+            flow.terms.emplace_back(j.first, minsky::FlowVar{});
+            populateItem(flow.terms.back().second, j.second);
+          }
+        auto fromId=flow.from()->item().variableCast()->valueId();
+        auto toId=flow.to()->item().variableCast()->valueId();
+        auto success=pd.flows.emplace(make_pair(fromId, toId), flow).second; //NOLINT
+        assert(success);
       }
   }
   

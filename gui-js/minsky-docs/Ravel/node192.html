@@ -1,0 +1,140 @@
+
+<!--Converted with LaTeX2HTML 2025 (Released January 1, 2025) -->
+<HTML lang="en">
+<HEAD>
+<TITLE>Quick instructions for the Data selection form</TITLE>
+
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-15">
+<META NAME="viewport" CONTENT="width=device-width, initial-scale=1.0">
+<META NAME="Generator" CONTENT="LaTeX2HTML v2025">
+
+<LINK REL="STYLESHEET" HREF="Ravel.css">
+
+<LINK REL="next" HREF="node193.html">
+<LINK REL="previous" HREF="node191.html">
+<LINK REL="next" HREF="node193.html">
+</HEAD>
+
+<BODY  bgcolor="#ffffff">
+<!--Navigation Panel-->
+<A
+ HREF="node193.html">
+<IMG WIDTH="37" HEIGHT="24" ALT="next" SRC="next.png"></A> 
+<A
+ HREF="node190.html">
+<IMG WIDTH="26" HEIGHT="24" ALT="up" SRC="up.png"></A> 
+<A
+ HREF="node191.html">
+<IMG WIDTH="63" HEIGHT="24" ALT="previous" SRC="prev.png"></A> 
+<A ID="tex2html1124"
+  HREF="Ravel.html">
+<IMG WIDTH="65" HEIGHT="24" ALT="contents" SRC="contents.png"></A>  
+<BR>
+<B> Next:</B> <A
+ HREF="node193.html">Temporal data</A>
+<B> Up:</B> <A
+ HREF="node190.html">Importing data into a</A>
+<B> Previous:</B> <A
+ HREF="node191.html">Data selection</A>
+ &nbsp; <B>  <A ID="tex2html1125"
+  HREF="Ravel.html">Contents</A></B> 
+<BR>
+<BR>
+<!--End of Navigation Panel-->
+
+<H2><A ID="SECTION004152000000000000000">
+Quick instructions for the Data selection form</A>
+</H2>
+
+<P>
+
+<UL>
+<LI>Data is typically (but not always) stored in the rightmost columns
+  of a CSV file. Shift click to set the top left cell of the data. Columns
+  to the left will be marked as axes. 
+</LI>
+<LI>Select ``axis'' in the Dimension dropdown to include a column as
+  an axis. Column data turns blue. 
+</LI>
+<LI>Select ``ignore'' in the Dimension dropdown to exclude a column.
+  Column data turns red. 
+</LI>
+<LI>Select ``data'' in the Dimension dropdown to treat a column as a
+  data column. Column data turns black. 
+</LI>
+<LI>Select Type for included axis columns. Select one of three types: 
+  <DL>
+<DT><STRONG>string</STRONG></DT>
+<DD>most general type, data treated as is. 
+  
+</DD>
+<DT><STRONG>value</STRONG></DT>
+<DD>value data must be numerical, e.g. 1, 2, and not quoted
+    (as in ``1'', ``2'', etc.)
+  
+</DD>
+<DT><STRONG>time</STRONG></DT>
+<DD>data must refer to date-time data. The format field may
+    be used to control interpretation of this data, though if this field
+    is left blank, Ravel will interpret the data format itself. Blank
+    format assumes data contains year/month/day/hour/minute/second separated
+    by some non-numerical character. If fewer than 6 numerical fields
+    present (from year to second), smallest units are set to minimum value
+    (0 or 1 respectively).
+  
+</DD>
+</DL>
+</LI>
+<LI>The header row can be set by clicking in the left hand margin.
+</LI>
+<LI>The column names can be quickly populated from the header row
+  from a context menu.
+</LI>
+<LI>Multiple columns can have their types changed simultaneously by click dragging
+  to select, then changing the value on one of the columns.
+</LI>
+<LI>When more than one data column exists, it creates a ``horizontal
+  dimension''. This has a name, type and format string, just like a
+  regular axis column.
+</LI>
+<LI>The ``unique values'' row shows the number of unique values in
+  that column. This can be used to determine columns to exclude (via
+  the ``ignore'' option. This becomes important when the hypercube
+  size is too large to be imported. Ravel uses 64 bit numbers to index
+  into the data cube, and so if the hypercube has more than <IMG
+ STYLE="height: 1.96ex; vertical-align: -0.12ex; " SRC="img280.png"
+ ALT="$2^{64}$% WIDTH=42 HEIGHT=28 ">
+  elements, Ravel will not be able to import the data. The hypercube
+  size is rendered in red if that is the case. Good columns to ignore
+  are things like unique keys exported from a database.
+</LI>
+</UL>
+
+<P>
+<HR>
+<!--Navigation Panel-->
+<A
+ HREF="node193.html">
+<IMG WIDTH="37" HEIGHT="24" ALT="next" SRC="next.png"></A> 
+<A
+ HREF="node190.html">
+<IMG WIDTH="26" HEIGHT="24" ALT="up" SRC="up.png"></A> 
+<A
+ HREF="node191.html">
+<IMG WIDTH="63" HEIGHT="24" ALT="previous" SRC="prev.png"></A> 
+<A ID="tex2html1124"
+  HREF="Ravel.html">
+<IMG WIDTH="65" HEIGHT="24" ALT="contents" SRC="contents.png"></A>  
+<BR>
+<B> Next:</B> <A
+ HREF="node193.html">Temporal data</A>
+<B> Up:</B> <A
+ HREF="node190.html">Importing data into a</A>
+<B> Previous:</B> <A
+ HREF="node191.html">Data selection</A>
+ &nbsp; <B>  <A ID="tex2html1125"
+  HREF="Ravel.html">Contents</A></B> 
+<!--End of Navigation Panel-->
+
+</BODY>
+</HTML>

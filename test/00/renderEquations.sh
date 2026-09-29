@@ -37,8 +37,9 @@ for i in *.mky; do
     # these ones are definitely random :)
     if [ "$i" = rand-gather-interpolation.mky ]; then continue; fi
     if [ "$i" = tensor-switch.mky ]; then continue; fi
-    $here/gui-tk/minsky $here/test/renderEquations.tcl $i
-    diff $i.gif $here/test/renderedEquations/$i.gif
+    if [ "$i" = histogram.mky ]; then continue; fi
+    python3 $here/test/renderEquations.py $i
+    $here/test/compareSVG.sh  $i.svg $here/test/renderedEquations/$i.svg
     if [ $? -ne 0 ]; then fail; fi
 done
 

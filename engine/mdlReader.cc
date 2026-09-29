@@ -17,11 +17,11 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "minsky.h"
 #include "mdlReader.h"
 #include "operation.h"
 #include "userFunction.h"
 #include "selection.h" //TODO why is this needed?
-#include "minsky.h"
 #include "minsky_epilogue.h"
 
 #include <boost/locale.hpp>
@@ -168,7 +168,7 @@ namespace minsky
       smatch match;
       if (regex_match(definition,match,identifier))
         {
-          VariablePtr rhs(VariableBase::flow, definition);
+          const VariablePtr rhs(VariableBase::flow, definition);
           group.addItem(rhs);
           if (port)
             group.addWire(rhs->ports(0).lock(), port);
@@ -192,15 +192,14 @@ namespace minsky
     
     void defineLookupFunction(Group& group, const std::string& name, const std::string& data)
     {
-      regex lookupPairsPattern(R"((\[[^\]]*\],)?(\(.*\)))");
+      const regex lookupPairsPattern(R"((\[[^\]]*\],)?(\(.*\)))");
       smatch match; 
       map<double,double> xData;
       if (regex_match(data,match,lookupPairsPattern))
         {
-          auto data=match[2].str();
-          regex extractHead(R"(\(([^,]*),([^)]*)\)(,(\(.*\)))*)");
+          const regex extractHead(R"(\(([^,]*),([^)]*)\)(,(\(.*\)))*)");
           // note match[3] is the trailing data, match[4] strips the leading ,
-          for (auto data=match[2].str(); regex_match(data, match, extractHead); data=match[4])
+          for (auto d=match[2].str(); regex_match(d, match, extractHead); d=match[4])
             xData[stod(match[1])]=stod(match[2]);
         }
       else
@@ -217,13 +216,13 @@ namespace minsky
       f->self=f;
       f->title=name;
       group.addItem(f);
-      VariablePtr dataVar(VariableType::flow,"data");
+      const VariablePtr dataVar(VariableType::flow,"data");
       f->addItem(dataVar);
       dataVar->moveTo(f->x()-50,f->y()-20);
-      OperationPtr gather(OperationType::gather);
+      const OperationPtr gather(OperationType::gather);
       f->addItem(gather);
       gather->moveTo(f->x()+30,f->y()-10);
-      VariablePtr inVar(VariableType::flow,"in"), outVar(VariableType::flow,"out");
+      const VariablePtr inVar(VariableType::flow,"in"), outVar(VariableType::flow,"out");
       f->addItem(inVar);
       f->addItem(outVar);
       f->inVariables.push_back(inVar);
@@ -236,8 +235,8 @@ namespace minsky
       auto& tensorInit=dataVar->vValue()->tensorInit;
       for (auto& i: xData)
         xVals.push_back(i.first);
-      Hypercube hc; hc.xvectors.push_back(move(xVals));
-      tensorInit.hypercube(move(hc));
+      Hypercube hc; hc.xvectors.push_back(std::move(xVals));
+      tensorInit.hypercube(std::move(hc));
 
       assert(tensorInit.size()==xData.size());
       auto j=tensorInit.begin();
@@ -251,11 +250,11 @@ namespace minsky
   void readMdl(Group& group, Simulation& simParms, istream& mdlFile)
   {
     set<string> integrationVariables;
-    regex integ(R"(\s*integ\s*\(([^,]*),([^,]*)\))");
-    regex number(R"(\d*\.?\d+[Ee]?\d*)");
-    regex unitFieldPattern(R"(([^\[\]]*)(\[.*\])?)");
-    regex sliderSpecPattern(R"(\[([^,]*),?([^,]*),?([^,]*)\])");
-    regex lookupPattern(R"(([^(]*)\((.*)\))");
+    const regex integ(R"(\s*integ\s*\(([^,]*),([^,]*)\))");
+    const regex number(R"(\d*\.?\d+[Ee]?\d*)");
+    const regex unitFieldPattern(R"(([^\[\]]*)(\[.*\])?)");
+    const regex sliderSpecPattern(R"(\[([^,]*),?([^,]*),?([^,]*)\])");
+    const regex lookupPattern(R"(([^(]*)\((.*)\))");
     smatch match;
     functionsAdded.clear();
 
@@ -289,29 +288,32 @@ namespace minsky
         // macros?
         // read variable name
         string nameStr=readToken(mdlFile,'=',true /* append delimiter */);
-        string name=collapseWS(trimWS(c+nameStr.substr(0,nameStr.length()-1)));
+        const string name=collapseWS(trimWS(c+nameStr.substr(0,nameStr.length()-1)));
         if (name.substr(0,9)==R"(\\\---///)")
           break; // we don't parse the sketch information - not used in Minsky
         string definition;
-        if (nameStr.back()=='=')
-          // only read definition if this was a variable definition
-          definition=collapseWS(trimWS(readToken(mdlFile,'~')));
-        switch (definition[0])
+        if (!nameStr.empty() && nameStr.back()=='=')
           {
-          case '=': case ':': // for now, treat constant assignment and data assignment equally to numeric assignment
-            definition.erase(definition.begin());
-            break;
-          default:
-            break;
+            // only read definition if this was a variable definition
+            definition=collapseWS(trimWS(readToken(mdlFile,'~')));
+            if (!definition.empty())
+              switch (definition[0])
+                {
+                case '=': case ':': // for now, treat constant assignment and data assignment equally to numeric assignment
+                  definition.erase(definition.begin());
+                  break;
+                default:
+                  break;
+                }
           }
         auto unitField=trimWS(readToken(mdlFile,'~'));
         regex_match(unitField,match,unitFieldPattern);
-        string units=trimWS(match[1]);
+        const string units=trimWS(match[1]);
         string sliderSpec;
         if (match.size()>1)
           sliderSpec=match[2];
         
-        string comments=trimWS(readToken(mdlFile,'|'));
+        const string comments=trimWS(readToken(mdlFile,'|'));
 
 
         if (currentMDLGroup==".Control")
@@ -334,7 +336,7 @@ namespace minsky
             auto intOp=new IntOp;
             group.addItem(intOp);
             intOp->description(name);
-            intOp->detailedText=comments;
+            intOp->detailedText(comments);
             auto& v=intOp->intVar;
             integrationVariables.insert(name);
             auto integrand=match[1].str();
@@ -353,12 +355,12 @@ namespace minsky
                 v->setUnits(units);
               }
             catch (...) {}
-            v->detailedText=comments;
+            v->detailedText(comments);
 
           }
         else if (regex_match(definition,match,number))
           {
-            VariablePtr v(VariableBase::parameter, name);
+            const VariablePtr v(VariableBase::parameter, name);
             group.addItem(v);
             v->init(definition);
             try  // absorb any errors in units - we have a chance to fix these later
@@ -366,29 +368,30 @@ namespace minsky
                 v->setUnits(units);
               }
             catch (...) {}
-            v->detailedText=comments;
-            if (regex_match(sliderSpec,match,sliderSpecPattern))
+            v->detailedText(comments);
+            if (auto vv=v->vValue())
               {
-                vector<string> spec;
-                for (size_t i=1; i<=match.size(); ++i) spec.push_back(match[i]);
-                if (!spec.empty() && regex_match(spec[0],match,number))
-                  v->sliderMin=stod(spec[0]);
-                else
-                  v->sliderMin=0.1*stod(definition);
-                if (spec.size()>1 && regex_match(spec[1],match,number))
-                  v->sliderMax=stod(spec[1]);
-                else
-                  v->sliderMax=10*stod(definition);
-                if (spec.size()>2 && regex_match(spec[2],match,number))
-                  v->sliderStep=stod(spec[2]);
-                v->adjustSliderBounds();
+                if (regex_match(sliderSpec,match,sliderSpecPattern))
+                  {
+                    vector<string> spec;
+                    for (size_t i=1; i<=match.size(); ++i) spec.push_back(match[i]);
+                    if (!spec.empty() && regex_match(spec[0],match,number))
+                      vv->sliderMin=stod(spec[0]);
+                    else
+                      vv->sliderMin=0.1*stod(definition);
+                    if (spec.size()>1 && regex_match(spec[1],match,number))
+                      vv->sliderMax=stod(spec[1]);
+                    else
+                      vv->sliderMax=10*stod(definition);
+                    if (spec.size()>2 && regex_match(spec[2],match,number))
+                      vv->sliderStep=stod(spec[2]);
+                  }
+                vv->adjustSliderBounds();
               }
-            else
-              v->initSliderBounds();
           }
         else
           {
-            VariablePtr v(VariableBase::flow, name);
+            const VariablePtr v(VariableBase::flow, name);
             group.addItem(v);
             addDefinitionToPort(group, v->ports(1).lock(), "Def: "+name, definition);
             try  // absorb any errors in units - we have a chance to fix these later
@@ -396,7 +399,7 @@ namespace minsky
                 v->setUnits(units);
               }
             catch (...) {}
-            v->detailedText=comments;
+            v->detailedText(comments);
           }
       }
 

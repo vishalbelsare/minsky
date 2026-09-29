@@ -19,20 +19,23 @@
 
 #ifndef DATASPECSCHEMA_H
 #define DATASPECSCHEMA_H
+#include "CSVTools.h"
+#include "ravelState.h"
 #include <set>
 #include <vector>
 #include <math.h>
 
 namespace minsky
 {
-  struct DataSpecSchema
+  struct DataSpecSchema: public ravel::CSVSpec
   {
     // these fields are only used for persistence. Need to be handled specially within schema code
-    std::size_t dataRowOffset, dataColOffset; 
-    
-    char separator=',', quote='"', escape='\\', decSeparator='.';
+    std::size_t dataRowOffset, dataColOffset;
+    std::size_t numCols=0; ///< number of columns in CSV. Must be > dataColOffset
+
     bool mergeDelimiters=false;
-    bool columnar=false;
+    bool counter=false; ///< count data items, not read their values
+    bool dontFail=false; ///< do not throw an error on corrupt data
     double missingValue=nan("");
     /// number of header rows
     std::size_t headerRow=0;
@@ -44,7 +47,7 @@ namespace minsky
     DuplicateKeyAction duplicateKeyAction=throwException;
     
     /// rows and columns that are comment lines to be ignored
-    std::set<unsigned> dimensionCols;
+    std::set<unsigned> dimensionCols, dataCols;
     std::vector<civita::Dimension> dimensions;
     std::vector<std::string> dimensionNames;
   };

@@ -17,7 +17,11 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "cairoItems.h"
 #include "selection.h"
+#include "lasso.h"
+#include "plotWidget.h"
+#include "selection.rcd"
 #include "minsky_epilogue.h"
 using namespace std;
 
@@ -57,7 +61,10 @@ namespace minsky
   {
     if (!item) return; //nothing to do
     if (auto g=dynamic_pointer_cast<Group>(item))
-      ensureGroupInserted(g);
+      {
+        ensureGroupInserted(g);
+        return;
+      }
     auto i=find(items.begin(), items.end(), item);
     if (i==items.end())
       insertItem(item);
@@ -110,5 +117,51 @@ namespace minsky
           return true;
     return false;
   }
-  
+
+  void Selection::align(const Item& ref, Align align)
+  {
+    auto apply=[&](const auto& i)
+    {
+      switch (align)
+        {
+        case left:
+          i->moveTo(i->x()+ref.left()-i->left(), i->y());
+          break;
+        case centre:
+          i->moveTo(ref.x(), i->y());
+          break;
+        case right:
+          i->moveTo(i->x()+ref.right()-i->right(), i->y());
+          break;
+        case left_right:
+          i->iWidth(ref.iWidth());
+          i->moveTo(ref.x(), i->y());
+          break;
+        case top:
+          i->moveTo(i->x(), i->y()+ref.top()-i->top());
+          break;
+        case middle:
+          i->moveTo(i->x(), ref.y());
+          break;
+        case bottom:
+          i->moveTo(i->x(), i->y()+ref.bottom()-i->bottom());
+          break;
+        case top_bottom:
+          i->iHeight(ref.iHeight());
+          i->moveTo(i->x(), ref.y());
+          break;
+        case equal_width:
+          i->iWidth(ref.iWidth());
+          break;
+         case equal_height:
+          i->iWidth(ref.iWidth());
+          break;
+        }
+    };
+
+    for (auto& i: items) apply(i);
+    for (auto& g: groups) apply(g);
+  }
 }
+
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Selection);

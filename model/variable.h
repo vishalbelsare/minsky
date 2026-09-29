@@ -23,7 +23,6 @@
 #include "str.h"
 #include "CSVParser.h"
 
-#include <ecolab.h>
 #include <arrays.h>
 
 #include <vector>
@@ -31,19 +30,26 @@
 // override EcoLab's default CLASSDESC_ACCESS macro
 #include "classdesc_access.h"
 
+#include "engNotation.h"
+
 #include "polyBase.h"
 #include <polyPackBase.h>
 #include "variableType.h"
-#include "item.h"
-#include <accessor.h>
+#include "itemT.h"
 #include <cairo/cairo.h>
+
+namespace ecolab {
+  class Pango;
+  class Plot;
+}
 
 namespace minsky
 {
   class VariablePtr;
   struct SchemaHelper;
   class GodleyIcon;
-
+  class RenderVariable;
+  
   /// exception-safe increment/decrement of a counter in a block
   struct IncrDecrCounter
   {
@@ -52,37 +58,47 @@ namespace minsky
     ~IncrDecrCounter() {--ctr;}
   };
 
-  namespace VarAccessors
+  /// caches need copy operations to be nobbled, because they hold a reference to the derived variable
+  class VariableCaches
   {
-    // constructors defined below once member functions available
-    struct NameAccessor: ecolab::TCLAccessor<minsky::VariableBase,std::string,0> {NameAccessor();};
-    struct InitAccessor: ecolab::TCLAccessor<minsky::VariableBase,std::string,1> {InitAccessor();};
-    struct ValueAccessor: ecolab::TCLAccessor<minsky::VariableBase,double> {ValueAccessor();};
-  }
-
+  CLASSDESC_ACCESS(VariableCaches);
+  protected:
+    /// cached font rendering objects
+    mutable std::shared_ptr<RenderVariable> cachedNameRender;
+    mutable std::shared_ptr<ICacheRender> cachedMantissa;
+    mutable std::shared_ptr<ICacheRender> cachedExponent;
+    mutable double cachedValue, cachedTime, cachedMaxSliderSteps;
+  public:
+    VariableCaches()=default;
+    VariableCaches(const VariableCaches&) {}
+    VariableCaches& operator=(const VariableCaches&) {return *this;}
+  };
+  
   class VariableBase: virtual public classdesc::PolyPackBase,
                       public BottomRightResizerItem,
-                      public Slider, public VariableType,
-                      public VarAccessors::NameAccessor,
-                      public VarAccessors::InitAccessor,
-                      public VarAccessors::ValueAccessor
+                      public VariableType,
+                      public classdesc::Exclude<VariableCaches>
   {
   public:
     typedef VariableType::Type Type;
-  protected:
- 
     friend struct minsky::SchemaHelper;
-    
+
   private:
     CLASSDESC_ACCESS(VariableBase);
-    std::string m_name; 
+    std::string m_name;
+    std::string m_canonicalName; ///< latex processed and active stripped version of name
     std::pair<std::string,std::string> m_dimLabelsPicked;    
     mutable int unitsCtr=0; ///< for detecting reentrancy in units()
     static int stockVarsPassed; ///< for detecting reentrancy in units()
 
+    void insertControlled(Selection& selection) override;
+
+    /// miniature plot feature
+    classdesc::Exclude<std::shared_ptr<ecolab::Plot>> miniPlot;
+    
   protected:
     void addPorts();
-    
+
   public:
     static int varsPassed; ///< for caching units calculation
     ///factory method
@@ -104,10 +120,16 @@ namespace minsky
     VariableBase* variableCast() override {return this;}
 
     float zoomFactor() const override;
+
+    /// @return true if variable is local to its group
+    bool local() const;
+    /// toggle local status
+    void toggleLocal() {name(m_name[0]==':'? m_name.substr(1): ':'+m_name);}
     
     /// @{ variable displayed name
     virtual std::string name() const;
     virtual std::string name(const std::string& nm);
+    const std::string& canonicalName() const {return m_canonicalName;}
     /// @}
 
     /// accessor for the name member (may differ from name() with top
@@ -117,8 +139,8 @@ namespace minsky
     bool ioVar() const override;
     
     /// ensure an associated variableValue exists
-    void ensureValueExists(VariableValue* vv, const std::string& name) const;
-
+    void ensureValueExists(VariableValue* vv) const;
+    
     /// string used to link to the VariableValue associated with this
     virtual std::string valueId() const;
     /// returns valueId for \a nm. If nm is not qualified, this
@@ -126,15 +148,10 @@ namespace minsky
     std::string valueIdInCurrentScope(const std::string& nm) const;
     /// variableValue associated with this. nullptr if not associated with a variableValue
     std::shared_ptr<VariableValue> vValue() const;
-    std::vector<unsigned> dims() const {
-      if (auto v=vValue()) return v->hypercube().dims();
-      else return {};
-    }
-    
-    std::vector<std::string> dimLabels() const {
-      if (auto v=vValue()) return v->hypercube().dimLabels();
-      else return {};
-    }    
+    /// variable's tensor shape
+    std::vector<unsigned> dims() const;
+    /// labels along each axis
+    std::vector<std::string> dimLabels() const;
         
     std::pair<std::string,std::string> getDimLabelsPicked() const {return m_dimLabelsPicked;}   
     std::pair<std::string,std::string> setDimLabelsPicked(const std::string& dimLabel1, const std::string& dimLabel2) {
@@ -151,20 +168,18 @@ namespace minsky
     virtual double value(const double&);
     virtual double value() const override;  
     /// @}
-    
-    //    void setValue(const TensorVal&);
 
-    
-    /// sets variable value (or init value)
-    void sliderSet(double x);
-    /// initialise slider bounds when slider first opened
-    void initSliderBounds() const;
-    void adjustSliderBounds() const;
-    /// a maximum of at most 10000 slider steps permitted
-    double maxSliderSteps() const;    
+    const std::string& detailedText() const override;
+    const std::string& detailedText(const std::string& x) override;
+    const std::string& tooltip() const override;
+    const std::string& tooltip(const std::string& x) override;
 
+    /// returns true if slider is to be drawn
+    bool sliderVisible() const;
+    
     /// sets/gets the units associated with this type
-    Units units(bool check=false) const override;
+    Units units(bool check) const override;
+    Units units() const {return units(false);}
     void setUnits(const std::string&) const;
     std::string unitsStr() const {return units().str();}
     
@@ -177,19 +192,15 @@ namespace minsky
     virtual VariableBase* clone() const override=0;
     bool isStock() const {return type()==stock || type()==integral;}
 
-    bool varTabDisplay=false;
-    void toggleVarTabDisplay() {varTabDisplay=!varTabDisplay;}     
-    bool attachedToDefiningVar(std::set<const Item*>&) const override {return varTabDisplay;}
-    using Item::attachedToDefiningVar;
     /// formula defining this variable
     std::string definition() const;
-    
+
     /** draws the icon onto the given cairo context 
         @return cairo path of icon outline
     */
-    void draw(cairo_t*) const override;  
+    void draw(const ICairoShim&) const override;
     void resize(const LassoBox& b) override;
-    ClickType::Type clickType(float x, float y) override;
+    ClickType::Type clickType(float x, float y) const override;
 
     /// @return true if variable is defined (inputWired() || isStock() && controlled)
     bool defined() const {return inputWired() || (isStock() && controller.lock());}
@@ -206,11 +217,36 @@ namespace minsky
     {return minsky::mantissa(value(),e, digits);}
 
     /// export this variable as a CSV file
-    void exportAsCSV(const std::string& filename) const;
-    /// import CSV file, using \a spec
-    void importFromCSV(std::string filename, const DataSpec& spec) const;
+    /// @param tabular - if true, the longest dimension is split across columns as a horizontal dimension
+    void exportAsCSV(const std::string& filename, bool tabular) const;
+    /// \deprecated To be removed in version 4.
+    /// import CSV files, using \a spec
+    void importFromCSV(const std::vector<std::string>& filenames,
+                       const DataSpecSchema& spec) const;
+    /// reload CSV file if previously imported
+    void reloadCSV();
 
-    void insertControlled(Selection& selection) override;
+    bool miniPlotEnabled() const {return bool(miniPlot);}
+    bool miniPlotEnabled(bool);
+    void resetMiniPlot();
+    
+    bool onMouseMotion(float x, float y) override;
+
+    void adjustSliderBounds() const;
+    
+    /// @{ slider parameters
+    double sliderMin() const;
+    double sliderMin(double) const;
+    double sliderMax() const;
+    double sliderMax(double) const;
+    double sliderStep() const;
+    double sliderStep(double) const;
+    bool sliderStepRel() const;
+    bool sliderStepRel(bool) const;
+    bool enableSlider() const;
+    bool enableSlider(bool) const;
+    /// @}
+
   };
 
   template <minsky::VariableType::Type T>
@@ -222,19 +258,20 @@ namespace minsky
     Type type() const override {return T;}
     std::size_t numPorts() const override;
 
-    Variable(const Variable& x): VariableBase(x) {this->addPorts();}
+    Variable(const Variable& x): ItemT<Variable<T>, VariableBase>(x) {this->addPorts();}
     Variable& operator=(const Variable& x) {
       VariableBase::operator=(x);
+      this->controller.reset(); // copy is not controlled by same object
       this->addPorts();
       return *this;
     }
-    Variable(Variable&& x): VariableBase(x) {this->addPorts();}
+    Variable(Variable&& x): ItemT<Variable<T>, VariableBase>(x) {this->addPorts();}
     Variable& operator=(Variable&& x) {
       VariableBase::operator=(x);
       this->addPorts();
       return *this;
     }
-    Variable(const std::string& name="") {this->name(name); this->addPorts();}
+    Variable(const std::string& name="") {VariableBase::name(name); this->addPorts();}
     std::string classType() const override 
     {return "Variable:"+VariableType::typeName(type());}
     Variable* clone() const override {
@@ -250,16 +287,14 @@ namespace minsky
   {
     int id;
     static int nextId;
-    VarConstant(): id(nextId++) {ensureValueExists(nullptr,"");}
+    VarConstant(): id(nextId++) {ensureValueExists(nullptr);}
     std::string valueId() const override {return "constant:"+str(id);}
     std::string name() const override {return init();}
-    std::string name(const std::string& nm) override {ensureValueExists(nullptr,""); return name();}
+    std::string name(const std::string& nm) override {ensureValueExists(nullptr); return name();}
     using VariableBase::value;
     double value(const double& x) override {init(str(x)); return x;}
     VarConstant* clone() const override {auto r=new VarConstant(*this); r->group.reset(); return r;}
     std::string classType() const override {return "VarConstant";}
-    void TCL_obj(classdesc::TCL_obj_t& t, const classdesc::string& d) override 
-    {::TCL_obj(t,d,*this);}
   };
 
   class VariablePtr: 
@@ -278,7 +313,7 @@ namespace minsky
       // check for incorrect type assignment
       assert(!var || *this);
     }
-    VariablePtr(const PtrBase& x): PtrBase(x) {}
+    VariablePtr(const classdesc::shared_ptr<VariableBase>& x): PtrBase(x) {}
     VariablePtr(const VariableBase& x): PtrBase(x.clone()) {}
     /// changes type of variable to \a type
     void retype(VariableBase::Type type);
@@ -287,8 +322,13 @@ namespace minsky
     /// make variable's type consistent with the type of the valueId
     void makeConsistentWithValue();
   };
-
 }
+
+namespace classdesc
+{
+  template <> struct is_smart_ptr<minsky::VariablePtr>: public true_type {};
+ }
+
 #include "variable.cd"
 #include "variable.xcd"
 #endif

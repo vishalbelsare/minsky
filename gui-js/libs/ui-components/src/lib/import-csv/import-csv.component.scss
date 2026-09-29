@@ -1,0 +1,254 @@
+@use '../../../../shared/src/lib/theme/common-style' as *;
+
+.main {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  flex-direction: column;
+  overflow: hidden;
+
+  .tabs-header {
+    flex: 0 0 30px;
+    display: flex;
+    flex-direction: row;
+    
+    .header-tab {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+
+      div {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+
+        width: 90%;
+
+        cursor: pointer;
+        user-select: none;
+
+        border-bottom: 3px ridge rgba(220, 149, 50, 0.4);
+      }
+
+      div.disabled {
+        cursor: auto;
+        color: lightgray;
+        border-bottom: 3px ridge rgba(220, 149, 50, 0.2);
+      }
+
+      div.selected {
+        font-weight: bold;
+        border-bottom: 3px ridge rgba(220, 149, 50, 1);
+      }
+    }
+  }
+
+  .tab-area {
+    padding: 10px;
+    height: 50%;
+    flex: 1;
+  }
+
+  .form-buttons {
+    flex: 0 0 30px;
+
+    margin: 0;
+  
+    button {
+      margin: 5px;
+    }
+  }
+
+  .tab-area.file-select-area {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-around;
+    align-items: center;
+
+    .import-option-field {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
+
+      .import-option-label {
+        margin: 10px;
+      }
+
+      .import-option-content {
+        margin: 10px;
+
+        * {
+          margin: 0px 10px;
+        }
+
+        input.url {
+          width: 400px;
+        }
+      }
+    }
+  }
+
+  .tab-area.settings-area {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+
+    span.import-settings {
+        align-items: center;
+        flex: 0 0 636px;
+    }
+    
+    span.inputs-group {
+      display: flex;
+      justify-content: center;
+
+      span {
+        margin: 0px 3px;
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+        align-items: start;
+
+        label {
+          display: flex;
+          flex-direction: column;
+          justify-content: flex-end;
+          align-items: center;
+          text-align: center;
+          font-weight: bold;
+          font-size: 14px;
+          margin-bottom: 5px;
+          min-height: 35px;
+        }
+
+        select {
+          cursor: pointer;
+          height: 21px;
+        }
+      }
+
+      span.wide-input {
+        flex: 0 0 200px;
+      }
+    }
+  }
+  
+  
+  .tab-area.canvas-area {
+      overflow: scroll;
+      justify-content: start;
+  }
+}
+
+::ng-deep .mat-mdc-autocomplete-panel {
+  width: 14rem !important;
+}
+
+::ng-deep .mat-mdc-option {
+  min-height: 0.9rem !important;
+  height: 0.9rem !important;
+
+  span.mdc-list-item__primary-text {
+    font-size: 0.8rem !important;
+  }
+}
+
+table {
+  border-collapse: collapse;
+  user-select: none;
+}
+
+th {
+  padding: 0px 10px;
+}
+
+td {
+  border: 1px solid black;
+  user-select: text;
+  min-width: 171px;
+
+  input[type='text'] {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+  }
+  input[type='checkbox'] {
+    width: auto;
+    padding: 0;
+  }
+  select {
+    width: 100%;
+    height: 100%;
+  }
+}
+
+.header {
+  cursor: pointer;
+}
+.col-type-container {
+   filter: brightness(100%)
+}
+.col-type-container.selected {
+   filter: brightness(80%)
+}
+
+.table-cell {
+  padding: 2px 6px;
+}
+
+.col-type-container {
+  filter: brightness(100%)
+}
+.col-type-container.selected {
+  filter: brightness(80%)
+}
+
+.hd-wedge-container {
+  position: relative;
+  z-index: 10000;
+}
+
+.column-wedge-container{
+  position: relative;
+  overflow-y: visible;
+
+  z-index: 1000;
+}
+
+.wedge-container {
+
+  .wedge-icon {
+    position: absolute;
+    top: 0px;
+    right: 0px;
+    margin: -1px 1px;
+
+    cursor: pointer;
+
+    transform: scale(0.75, 0.85);
+  }
+
+  .wedge-options-panel {
+    position: absolute;
+    top: 100%;
+    right: 1px;
+    border: 0.5px solid black;
+    width: calc(100% - 2px);
+
+    .wedge-option {
+      font-size: 12px;
+      padding: 2px;
+      background-color: white;
+    }
+
+    .wedge-option:hover {
+      background-color: rgb(25, 103, 210);
+      color: white;
+    }
+  }
+}

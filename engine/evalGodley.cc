@@ -17,9 +17,12 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "cairoItems.h"
 #include "evalGodley.h"
 #include "group.h"
 #include "selection.h"
+#include "lasso.h"
+#include "evalGodley.rcd"
 #include "minsky_epilogue.h"
 
 using namespace std;
@@ -64,7 +67,7 @@ namespace minsky
 
   bool SharedColumnCheck::updateColDefs(const string& col, const FlowCoef& fc)
   {
-    bool alreadySeen=sharedCol.count(col);
+    const bool alreadySeen=sharedCol.contains(col);
     if (alreadySeen)
       colDef[col][fc.name]-=fc.coef;
     else
@@ -86,12 +89,24 @@ namespace minsky
       }
   }
 
-  void EvalGodley::eval(double sv[], const double fv[]) const
+  void EvalGodley::eval(double* sv, const double* fv) const
   {
-    for (size_t i=0; i<initIdx.size(); ++i)
+    size_t initIdxSize=initIdx.size();
+#ifdef _OPENMP
+#pragma omp parallel for if(initIdxSize>20)
+#endif
+    for (size_t i=0; i<initIdxSize; ++i)
       sv[initIdx[i]]=0;
 
+#ifdef _OPENMP
+    size_t sidxSize=sidx.size();
+#pragma omp parallel for if(sidxSize>20)
+    for (size_t i=0; i<sidxSize; ++i)
+      atomic_ref(sv[sidx[i]]) += fv[fidx[i]] * m[i];
+#else
     for (size_t i=0; i<sidx.size(); ++i)
       sv[sidx[i]] += fv[fidx[i]] * m[i];
+#endif
   }
 }
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::EvalGodley);

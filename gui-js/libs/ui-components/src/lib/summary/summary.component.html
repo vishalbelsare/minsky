@@ -1,0 +1,187 @@
+<div class="table-wrapper" (mousewheel)="changeScale($event)"
+  (keyup)="$event.stopImmediatePropagation()"
+  (keydown)="$event.stopImmediatePropagation()"
+  >
+  <div class="table" [style.zoom]="scale.zoomFactor">
+    <!-- all variables anbd global variables -->
+    @for (category of ['allVariables','globalVariables','groups','godleys']; track category) {
+      <div>
+        <span class="caret" (click)="toggleCaret($event)">{{labels[category]}} - {{numVars[category]}}
+          @for (type of types(category); track type) {
+            <div class="nested">
+              @if (type!=='constant') {
+                <span class="caret one-indent" (click)="toggleCaret($event)">{{type}} - {{this[category][type]?.length}}
+                  <div class="nested" (click)="$event.stopImmediatePropagation()">
+                    <div class="table-row header-row">
+                      @if (['groups','godleys'].includes(category)) {
+                        <div
+                        class="data-cell">Type</div>
+                      }
+                      <div class="data-cell">Name</div>
+                      <div class="data-cell extra-wide">Definition</div>
+                      <div class="data-cell wide">Dimensions</div>
+                      <div class="data-cell wide">Units</div>
+                      <div class="data-cell numeric">Initial</div>
+                      @if (type=='parameter') {
+                        <div class="data-cell numeric">Step</div>
+                      }
+                      @if (type=='parameter') {
+                        <div class="data-cell numeric">Min</div>
+                      }
+                      @if (type=='parameter') {
+                        <div class="data-cell numeric">Max</div>
+                      }
+                      <div class="data-cell numeric">Value</div>
+                    </div>
+                    @for (variable of this[category][type]; track variable) {
+                      <div
+                        class="table-row">
+                        @if (['groups','godleys'].includes(category)) {
+                          <div
+                          class="data-cell">{{variable.type}}</div>
+                        }
+                        @if (!editing(variable,'name')) {
+                          <div [title]="variable.name" class="data-cell"
+                            latex [equation]="variable.name"
+                            (click)="edit($event,variable,'name')"
+                            >
+                          </div>
+                        }
+                        @else {
+                          <div
+                            class="data-cell">
+                            <input
+                              (keydown.Enter)="finishEditing()"
+                              (click)="$event.stopImmediatePropagation()"
+                              type="text" [(ngModel)]="editCellContents"/>
+                          </div>
+                        }
+                        @if (!editing(variable,'definition')) {
+                          <div [title]="variable.definition" class="data-cell extra-wide" latex
+                            [equation]="variable.definition"
+                            (click)="edit($event,variable,'definition')"
+                            >
+                          </div>
+                        }
+                        @else {
+                          <div
+                            class="data-cell extra-wide">
+                            <input
+                              (keydown.Enter)="finishEditing()"
+                              (click)="$event.stopImmediatePropagation()"
+                              type="text" [(ngModel)]="editCellContents"/>
+                          </div>
+                        }
+                        <div [title]="variable.dimensions"
+                          class="data-cell wide">
+                          {{variable.dimensions.toString()}}
+                        </div>
+                        @if (!editing(variable,'units')) {
+                          <div
+                            [title]="variable.units"
+                            (click)="edit($event,variable,'units')"
+                            class="data-cell wide" latex
+                            equation="{{variable.units}}"
+                            >
+                          </div>
+                        }
+                        @else {
+                          <div
+                            class="data-cell wide">
+                            <input
+                              (keydown.Enter)="finishEditing()"
+                              (click)="$event.stopImmediatePropagation()"
+                              type="text" [(ngModel)]="editCellContents"/>
+                          </div>
+                        }
+                        @if (!editing(variable,'init')) {
+                          <div
+                            [title]="variable.init"
+                            (click)="edit($event,variable,'init')"
+                            class="data-cell numeric" latex
+                            equation="{{truncateValue(variable.init)}}"
+                            >
+                          </div>
+                        }
+                        @else {
+                          <div
+                            class="data-cell">
+                            <input
+                              (keydown.Enter)="finishEditing()"
+                              (click)="$event.stopImmediatePropagation()"
+                              type="text" [(ngModel)]="editCellContents"/>
+                          </div>
+                          }
+                        @if (type=='parameter') {
+                          @if (!editing(variable,'sliderStep')) {
+                          <div
+                            [title]="variable.sliderStep"
+                            (click)="edit($event,variable,'sliderStep')"
+                            class="data-cell numeric" latex
+                            equation="{{truncateValue(variable.sliderStep)}}"
+                            >
+                          </div>
+                          } @else  {
+                          <div
+                            class="data-cell">
+                            <input
+                              (keydown.Enter)="finishEditing()"
+                              (click)="$event.stopImmediatePropagation()"
+                              type="text" [(ngModel)]="editCellContents"/>
+                          </div>
+                          }
+                          @if (!editing(variable,'sliderMin')) {
+                          <div
+                            [title]="variable.sliderMin"
+                            (click)="edit($event,variable,'sliderMin')"
+                            class="data-cell numeric" latex
+                            equation="{{truncateValue(variable.sliderMin)}}"
+                            >
+                          </div>
+                          } @else {
+                          <div
+                            class="data-cell">
+                            <input
+                              (keydown.Enter)="finishEditing()"
+                              (click)="$event.stopImmediatePropagation()"
+                              type="text" [(ngModel)]="editCellContents"/>
+                          </div>
+                          }
+                          @if (!editing(variable,'sliderMax')) {
+                          <div
+                            [title]="variable.sliderMax"
+                            (click)="edit($event,variable,'sliderMax')"
+                            class="data-cell numeric" latex
+                            equation="{{truncateValue(variable.sliderMax)}}"
+                            >
+                          </div>
+                          } @else {
+                          <div
+                            class="data-cell">
+                            <input
+                              (keydown.Enter)="finishEditing()"
+                              (click)="$event.stopImmediatePropagation()"
+                              type="text" [(ngModel)]="editCellContents"/>
+                          </div>
+                          }
+                        }
+                        @if (!variable.dimensions.length) {
+                          <div
+                            [title]="variable.value" class="data-cell numeric"
+                            latex
+                            equation="{{truncateValue(variable.value)}}"
+                            >
+                          </div>
+                        }
+                      </div>
+                    }
+                  </div>
+                </span>
+              }
+            </div>
+          }
+        </span>
+      </div>
+    }
+  </div>
+</div>

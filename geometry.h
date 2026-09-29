@@ -46,11 +46,12 @@ namespace minsky
     float angle; // in radians
     float ca, sa;
     float x0, y0;
+    static constexpr float rad=M_PI/180.0;
   public:
     Rotate(float rot, float x0, float y0):
-      angle(rot*M_PI/180.0), ca(std::cos(angle)), sa(std::sin(angle)), x0(x0), y0(y0) {}
+      angle(rot*rad), ca(std::cos(angle)), sa(std::sin(angle)), x0(x0), y0(y0) {}
     bool initialisedFrom(float rot, float x, float y) const
-    {return x==x0 && y==y0 && angle==rot*M_PI/180.0;}
+    {return x==x0 && y==y0 && angle==rot*rad;}
     /// rotate (x1,y1)
     Point operator()(float x1, float y1) const {
       return Point(x(x1,y1),y(x1,y1));}
@@ -95,6 +96,13 @@ namespace minsky
   inline int quadrant(double x)
   {
     return int(clamp360(x+45)/90);
+  }
+
+  /// returns if the \a angle (in degrees) is in the second or third quadrant
+  inline bool flipped(double rotation)
+  {
+    const double fm=std::fmod(rotation,360);
+    return std::abs(fm)>90 && std::abs(fm)<270;
   }
 }
 

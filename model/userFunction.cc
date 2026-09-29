@@ -17,20 +17,79 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "minsky.h"
 #include "userFunction.h"
 #include "evalOp.h"
 #include "selection.h"
-#include "minsky.h"
+#include "itemT.rcd"
+#include "userFunction.rcd"
 #include "minsky_epilogue.h"
 
-#include <exprtk/exprtk.hpp>
+#ifndef NO_EXPRTK
+// preload these system headers here, to prevent them from being loaded into anonymous namespace
+#include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <complex>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <deque>
+#include <exception>
+#include <functional>
+#include <iterator>
+#include <limits>
+#include <list>
+#include <map>
+#include <set>
+#include <stack>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+#if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
+#   ifndef NOMINMAX
+#      define NOMINMAX
+#   endif
+#   ifndef WIN32_LEAN_AND_MEAN
+#      define WIN32_LEAN_AND_MEAN
+#   endif
+#   include <windows.h>
+#   include <ctime>
+#else
+#   include <ctime>
+#   include <sys/time.h>
+#   include <sys/types.h>
+#endif
+#endif
 
 namespace minsky
 {
   int UserFunction::nextId=0;
-  
-  namespace {
+
+  template <> void Operation<OperationType::userFunction>::iconDraw(const ICairoShim&) const
+  {assert(false);}
+
+#ifdef NO_EXPRTK
+  // dummy implementations to satisfy the linker
+  UserFunction::UserFunction(const string&, const string&) {}
+  vector<string> UserFunction::symbolNames() const {return {};}
+  void UserFunction::compile() {}
+  double UserFunction::evaluate(double, double) {return {};}
+  double UserFunction::operator()(const vector<double>& p) {}
+  Units UserFunction::units(bool check) const {return {};}
+  string UserFunction::description(const string&) {return {};}
+  string UserFunction::name() const {return {};}
+#else
+}
+
+#include <exprtk/exprtk.hpp>
+
+namespace minsky
+{
+  namespace
+  {
     // resolve overloads
     inline double isfinite(double x) {return std::isfinite(x);}
     inline double isinf(double x) {return std::isinf(x);}
@@ -71,9 +130,6 @@ namespace minsky
     std::vector<ExprTkCallableFunction> functions;
   };
   
-
-  template <> void Operation<OperationType::userFunction>::iconDraw(cairo_t*) const
-  {assert(false);}
 
   UserFunction::UserFunction(const string& name, const string& expression): impl(make_shared<Impl>()), argNames{"x","y"}, expression(expression)  {
     UserFunction::description(name);
@@ -126,7 +182,7 @@ namespace minsky
     addTimeVariables(impl->symbols);
     for (auto& i: symbolNames())
       {
-        auto scopedName=VariableValue::valueIdFromScope(group.lock(),i);
+        auto scopedName=valueIdFromScope(group.lock(),canonicalName(i));
         auto v=minsky().variableValues.find(scopedName);
         if (v!=minsky().variableValues.end())
           {
@@ -175,7 +231,7 @@ namespace minsky
   string UserFunction::description(const string& nm)
   {
     NamedOp::description(nm);
-    static regex extractArgList(R"([^(]*\(([^)]*)\))");
+    static const regex extractArgList(R"([^(]*\(([^)]*)\))");
     smatch match;
     string argList;
     if (regex_match(nm,match,extractArgList))
@@ -192,15 +248,15 @@ namespace minsky
 
   string UserFunction::name() const
   {
-    static regex extractName(R"(([^(]*).*)");
+    static const regex extractName(R"(([^(]*).*)");
     smatch match;
     auto d=description();
     regex_match(d, match, extractName);
     assert (match.size()>1);
     return match[1];
   }    
-
-
-  
 }
 
+#endif
+
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::UserFunction);

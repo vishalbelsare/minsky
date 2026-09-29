@@ -43,7 +43,7 @@ namespace minsky
   class Grid: public JustificationStruct
   {
     /// move current cursor to \a x,y
-    virtual void moveTo(double x, double y)=0;
+    virtual void moveCursorTo(double x, double y)=0;
     CLASSDESC_ACCESS(Grid);
   public:
     virtual ~Grid()=default;
@@ -52,7 +52,7 @@ namespace minsky
     virtual unsigned numRows() const=0;
     virtual unsigned numCols() const=0;
    /// justification of \a col
-    virtual Justification justification(unsigned col) const {return left;};
+    virtual JustificationStruct::Justification justification(unsigned col) const {return left;};
     /// whether cells all have the same height or not
     virtual bool evenHeight() const {return true;}
     /// coordinates of right and bottom margins of cells. Valid after draw()

@@ -1,0 +1,55 @@
+@use '../../../../shared/src/lib/theme/variables' as *;
+
+.container {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: stretch;
+
+  overflow: hidden;
+
+  padding: 10px;
+
+  .buttons {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+input {
+  width: 100%;
+}
+.text-div {
+  flex: 1;
+}
+
+textarea {
+  width: 100%;
+  height: 100%;
+}
+button {
+  flex: 0;
+  padding: 0px 10px;
+  margin: 5px;
+}
+
+.header-row {
+  flex: 0;
+  width: 100%;
+
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  .other-div {
+    flex: 0;
+    margin: 10px 0px 10px 10px;
+  }
+  
+  .input-div {
+    flex: 1;
+  }
+}

@@ -31,6 +31,7 @@ but any renamed attributes require bumping the schema number.
 #include "schema/schema1.h"
 #include "schemaHelper.h"
 #include "classdesc.h"
+#include "plotOptions.h"
 #include "polyXMLBase.h"
 #include "polyJsonBase.h"
 #include "simulation.h"
@@ -39,7 +40,6 @@ but any renamed attributes require bumping the schema number.
 #include "optional.h"
 
 #include <xsd_generate_base.h>
-#include "xml_common.xcd"
 #include <vector>
 #include <string>
 
@@ -60,12 +60,12 @@ namespace schema2
   {
     Optional<std::string> detailedText, tooltip;
     Note() {}
-    template <class T>
-    Note(const T& x): detailedText(x.detailedText), tooltip(x.tooltip) {}
+    Note(const minsky::NoteBase& x): detailedText(x.detailedText()), tooltip(x.tooltip()) {}
+    Note(const schema1::Item& x): detailedText(x.detailedText), tooltip(x.tooltip) {}
   };
 
   // attribute common to all items
-  struct ItemBase: public Note
+  struct ItemBase: public minsky::PlotOptions<Note>
   {
     int id=-1;
     std::string type;
@@ -75,11 +75,11 @@ namespace schema2
     std::vector<int> ports;
     ItemBase() {}
     ItemBase(int id, const minsky::Item& it, const std::vector<int>& ports): 
-      Note(it), id(id), type(it.classType()),
+      minsky::PlotOptions<Note>(Note(it)), id(id), type(it.classType()),
       x(it.m_x), y(it.m_y), zoomFactor(it.zoomFactor()), rotation(it.rotation()),
       ports(ports) {}
     ItemBase(const schema1::Item& it, const std::string& type="Item"):
-      Note(it), id(it.id), type(type) {}
+      PlotOptions<Note>(it), id(it.id), type(type) {}
   };
 
   struct Slider
@@ -111,13 +111,6 @@ namespace schema2
     Optional<std::vector<std::vector<std::string>>> data;
     Optional<std::vector<minsky::GodleyAssetClass::AssetClass>> assetClasses;
     Optional<float> iconScale; // for handling legacy schemas
-    // Plot specific fields
-    Optional<bool> logx, logy, ypercent;
-    Optional<Plot::PlotType> plotType;
-    Optional<std::string> xlabel, ylabel, y1label;
-    Optional<int> nxTicks, nyTicks;
-    Optional<double> xtickAngle, exp_threshold;
-    Optional<ecolab::Plot::Side> legend;
     // group specific fields
     Optional<std::vector<minsky::Bookmark>> bookmarks;
     Optional<classdesc::CDATA> tensorData; // used for saving tensor data attached to parameters
@@ -145,9 +138,13 @@ namespace schema2
       name(it.name), init(it.init)  {ports=it.ports;}
     Item(const schema1::Godley& it);
     Item(const schema1::Plot& it):
-      ItemBase(it, "PlotWidget"),
-      name(it.title), logx(it.logx), logy(it.logy), xlabel(it.xlabel), ylabel(it.ylabel), y1label(it.y1label)
+      ItemBase(it, "PlotWidget"), name(it.title)
     {
+      logx=it.logx;
+      logy=it.logy;
+      xlabel=it.xlabel;
+      ylabel=it.ylabel;
+      y1label=it.y1label;
       if (it.legend) legend=*it.legend;
       ports=it.ports;
     }
@@ -160,18 +157,16 @@ namespace schema2
       rotation=layout.rotation;
       if (layout.width>=0)
         width.reset(new float(layout.width));
-      else if (type=="PlotWidget")
+      else if (type=="PlotWidget" || type=="GodleyIcon")
         width.reset(new float(150));
       if (layout.height>=0)
         height.reset(new float(layout.height));
-      else if (type=="PlotWidget")
+      else if (type=="PlotWidget" || type=="GodleyIcon")
         height.reset(new float(150));
       if (layout.sliderBoundsSet)
         slider.reset(new Slider(layout.sliderVisible,layout.sliderStepRel,
                                 layout.sliderMin,layout.sliderMax,layout.sliderStep));
     }
-
-    //    void packTensorInit(const minsky::VariableBase&);
   };
 
 

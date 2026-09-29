@@ -1,0 +1,129 @@
+<div class="popup-wrapper">
+  <div class="popup-title">Simulation parameters</div>
+
+  <div class="form-wrapper">
+    <form [formGroup]="form">
+      <div class="form-control">
+        <label for="timeUnit">Time unit</label>
+        <input
+          formControlName="timeUnit"
+          type="text"
+          class="time-unit"
+          id="timeUnit"
+        />
+      </div>
+
+      <div class="form-control">
+        <label for="minStepSize">Min step size</label>
+        <input
+          formControlName="minStepSize"
+          type="number"
+          class="min-step-size"
+          id="minStepSize"
+          value="0"
+        />
+      </div>
+
+      <div class="form-control">
+        <label for="maxStepSize">Max step size</label>
+        <input
+          formControlName="maxStepSize"
+          type="number"
+          class="max-step-size"
+          id="maxStepSize"
+          value="0.01"
+        />
+      </div>
+
+      <div class="form-control">
+        <label for="noStepsPerIteration">No. steps per iteration</label>
+        <input
+          formControlName="noOfStepsPerIteration"
+          type="number"
+          class="no-steps-per-iteration"
+          id="noStepsPerIteration"
+          value="1"
+        />
+      </div>
+
+      <div class="form-control">
+        <label for="startTime">Start time</label>
+        <input
+          formControlName="startTime"
+          type="number"
+          class="start-ime"
+          id="startTime"
+          value="0"
+        />
+      </div>
+
+      <div class="form-control">
+        <label for="runUntilTime">Run until time</label>
+        <input
+          formControlName="runUntilTime"
+          type="text"
+          class="run-until-time"
+          id="runUntilTime"
+          value="Inf"
+        />
+      </div>
+
+      <div class="form-control">
+        <label for="absoluteError">Absolute error</label>
+        <input
+          formControlName="absoluteError"
+          type="number"
+          class="absolute-error"
+          id="absoluteError"
+          value="0.001"
+        />
+      </div>
+
+      <div class="form-control">
+        <label for="relativeError">Relative error</label>
+        <input
+          formControlName="relativeError"
+          type="number"
+          class="relative-error"
+          id="relativeError"
+          value="0.01"
+        />
+      </div>
+
+      <div class="form-control">
+        <label for="solverOrder">Solver order (1,2 or 4)</label>
+        <input
+          formControlName="solverOrder"
+          type="number"
+          class="solver-order"
+          id="solverOrder"
+          value="4"
+        />
+      </div>
+
+      <div class="form-control">
+        <label for="implicitSolver">Implicit solver</label>
+        <input
+          formControlName="implicitSolver"
+          type="checkbox"
+          class="implicit-solver"
+          id="implicitSolver"
+        />
+      </div>
+
+      <div class="form-control form-buttons">
+        <button type="button" mat-raised-button (click)="closeWindow()">
+          Cancel
+        </button>
+        <button
+          type="submit"
+          class="submit"
+          mat-raised-button
+          (click)="handleSubmit()"
+        >
+          OK
+        </button>
+      </div>
+    </form>
+  </div>
+</div>

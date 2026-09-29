@@ -17,8 +17,17 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#undef CLASSDESC_ARITIES
+#define CLASSDESC_ARITIES 0x3f
+#include "cairoItems.h"
 #include "grid.h"
+#include "variablePane.h"
+#include "lasso.h"
 #include <pango.h>
+#include "grid.rcd"
+#include "grid.xcd"
+#include "pango.rcd"
+#include "pango.xcd"
 #include "minsky_epilogue.h"
 #include <algorithm>
 
@@ -35,7 +44,7 @@ namespace minsky
     bottomRowMargin.clear();
     if (evenHeight())
       {
-        double rowHeight=cell(0,0).height();
+        const double rowHeight=cell(0,0).height();
         for (unsigned i=0; i<numRows(); ++i)
           bottomRowMargin.push_back((i+1)*rowHeight);
       }
@@ -80,7 +89,7 @@ namespace minsky
               case right: offset+=colWidth-currentCell.width(); break;
               case centre: offset+=0.5*(colWidth-currentCell.width()); break;
               }
-            moveTo(x+offset+0.5*padx,y);
+            moveCursorTo(x+offset+0.5*padx,y);
             currentCell.show();
             colWidth=std::max(colWidth, currentCell.width()+padx);
             y=bottomRowMargin[row];
@@ -110,5 +119,9 @@ namespace minsky
 
   template class Grid<ICell>;
   template class Grid<ecolab::Pango>;
-  
+  template class Grid<VariablePaneCell>;
+
 }
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Grid<minsky::ICell>);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Grid<ecolab::Pango>);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Grid<minsky::VariablePaneCell>);

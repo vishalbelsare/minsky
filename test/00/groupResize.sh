@@ -1,62 +1,50 @@
 #! /bin/sh
 
 here=`pwd`
-if test $? -ne 0; then exit 2; fi
-tmp=/tmp/$$
-mkdir $tmp
-if test $? -ne 0; then exit 2; fi
-cd $tmp
-if test $? -ne 0; then exit 2; fi
+. $here/test/common-test.sh
 
-fail()
-{
-    echo "FAILED" 1>&2
-    cd $here
-    chmod -R u+w $tmp
-    rm -rf $tmp
-    exit 1
-}
+cat >input.py <<EOF
+from pyminsky import minsky, findObject
 
-pass()
-{
-    echo "PASSED" 1>&2
-    cd $here
-    chmod -R u+w $tmp
-    rm -rf $tmp
-    exit 0
-}
+# Load the specified .mky file
+minsky.load('$here/examples/GoodwinLinear02.mky')
 
-trap "fail" 1 2 3 15
+# Center the canvas
+minsky.canvas.recentre()
 
-# insert ecolab script code here
-# use \$ in place of $ to refer to variable contents
-# exit 0 to indicate pass, and exit 1 to indicate failure
-cat >input.tcl <<EOF
-source $here/test/assert.tcl
-proc afterMinskyStarted {} {uplevel #0 {
- minsky.load $here/examples/GoodwinLinear02.mky
- recentreCanvas
- set item minsky.canvas.item
- assert {[findObject Group]}
- set x [\$item.right]
- set y [\$item.bottom]
- set w [\$item.width]
- set h [\$item.height]
- set z [\$item.zoomFactor]
+# Find and focus on the Group item
+group = findObject("Group")
+assert group is not None, "Group not found or not focused"
 
- canvas.mouseDown \$x \$y
- set x [expr \$x+100]
- set y [expr \$y+100]
- canvas.mouseUp \$x  \$y
+# Retrieve initial dimensions and zoom
+x = group.right()
+y = group.bottom()
+w = group.width()
+h = group.height()
+z = group.zoomFactor()
+print(f"Group initial position and dimensions: right={x}, bottom={y}, width={w}, height={h}, zoom={z}")
 
- findObject Group
- assert "abs(\$x-[minsky.canvas.item.right])<6"
- assert "abs(\$y-[minsky.canvas.item.bottom])<6"
- tcl_exit
-}}
+# Perform mouse operations to resize the Group item
+minsky.canvas.mouseDown(x, y)
+x += 100
+y += 100
+minsky.canvas.mouseUp(x, y)
+
+# Reselect the Group to verify updated dimensions
+found_group = findObject("Group")
+assert found_group is not None, "Could not reselect Group item after resize"
+
+# Retrieve updated dimensions
+updated_x = found_group.right()
+updated_y = found_group.bottom()
+print(f"Updated Group position: right={updated_x}, bottom={updated_y}")
+
+# Verify that the updated position is within the expected bounds
+assert abs(x - updated_x) < 6, "Right boundary mismatch after resizing"
+assert abs(y - updated_y) < 6, "Bottom boundary mismatch after resizing"
 EOF
 
-$here/gui-tk/minsky input.tcl
-if test $? -ne 0; then fail; fi
+python3 input.py
+if [ $? -ne 0 ]; then fail; fi
 
 pass

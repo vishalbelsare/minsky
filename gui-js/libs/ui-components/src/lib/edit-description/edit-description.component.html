@@ -1,0 +1,31 @@
+<div class="container" [formGroup]="editDescriptionForm">
+  <div class="header-row">
+    <div class="input-div">
+      <input
+          type="text"
+          formControlName="tooltip"
+          placeholder="Short Description"
+          />
+    </div>
+    <div class="other-div">Bookmark?</div>
+    <div class="other-div"><input
+          type="checkbox"
+          formControlName="bookmark"
+          />
+    </div>
+  </div>
+  <div class="text-div">
+    <textarea
+      formControlName="detailedText"
+      type="text"
+      placeholder="Long Description"
+      class="long-description defaultEscapeEnter"
+    ></textarea>
+  </div>
+  <div class="buttons">
+    <button mat-raised-button (click)="closeWindow()">Cancel</button>
+    <button mat-raised-button class="submit" (click)="handleSave()">
+      Save
+    </button>
+  </div>
+</div>

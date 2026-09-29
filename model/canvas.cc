@@ -17,13 +17,22 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#undef CLASSDESC_ARITIES
+#define CLASSDESC_ARITIES 0x3F 
+#include "minsky.h"
 #include "geometry.h"
 #include "canvas.h"
 #include "cairoItems.h"
-#include "minsky.h"
 #include "ravelWrap.h"
 #include <cairo_base.h>
 
+#include "cairoShimCairo.h"
+#include "canvas.rcd"
+#include "canvas.xcd"
+#include "eventInterface.rcd"
+#include "nobble.h"
+#include "port.xcd"
+#include "renderNativeWindow.xcd"
 #include "minsky_epilogue.h"
 using namespace std;
 using namespace ecolab::cairo;
@@ -64,7 +73,6 @@ namespace minsky
                 itemFocus.reset();
               }
             break;
-          case ClickType::onSlider:
           case ClickType::onItem:
             moveOffsX=x-itemFocus->x();
             moveOffsY=y-itemFocus->y();
@@ -117,11 +125,11 @@ namespace minsky
     model->recursiveDo(&GroupItems::items,
                        [&](const Items&, Items::const_iterator i)
                        {
-                         if ((*i)->group.lock()->displayContents())
+                         if ((*i)->group.lock()->displayContents() || (*i)->ioVar())
                            for (size_t pi=0; pi<(*i)->portsSize(); ++pi)
                              {
                                auto p=(*i)->ports(pi).lock();
-                               float d=sqr(p->x()-x)+sqr(p->y()-y);
+                               const float d=sqr(p->x()-x)+sqr(p->y()-y);
                                if (d<minD)
                                  {
                                    minD=d;
@@ -137,17 +145,26 @@ namespace minsky
   {
     mouseMove(x,y);
     
+    if (itemFocus) item=itemFocus;
     if (itemFocus && clickType==ClickType::inItem)
       {
-        itemFocus->onMouseUp(x,y);
+        bool requestReset=itemFocus->onMouseUp(x,y);
         itemFocus.reset(); // prevent spurious mousemove events being processed
-        minsky().reset();
+        if (requestReset) minsky().requestReset();
       }
     if (fromPort.get())
       {
-          if (auto to=closestInPort(x,y))
+          if (auto to=closestInPort(x,y)) {
             model->addWire(static_cast<shared_ptr<Port>&>(fromPort),to);
-        fromPort.reset();
+
+            // populate the destination tooltip if a Ravel
+            if (to->item().tooltip().empty() && to->item().ravelCast())
+              if (auto v=fromPort->item().variableCast())
+                to->item().tooltip(v->name());
+            
+            minsky().requestReset(); 
+          } 
+          fromPort.reset();
       }
     
     if (wireFocus)
@@ -156,7 +173,7 @@ namespace minsky
     switch (lassoMode)
       {
       case LassoMode::lasso:
-        select(lasso.x0,lasso.y0,x,y);
+        select({lasso.x0,lasso.y0,x,y});
         requestRedraw();
         break;
       case LassoMode::itemResize:
@@ -171,74 +188,74 @@ namespace minsky
     lassoMode=LassoMode::none;
 
     
-    itemIndicator=false;
+    itemIndicator.reset();
+    rotatingItem=false;
     itemFocus.reset();
     wireFocus.reset();
+  }
+
+  void Canvas::mouseMoveOnItem(float x, float y)
+  {
+    updateRegion=LassoBox(itemFocus->x(),itemFocus->y(),x,y);
+    // move item relatively to avoid accidental moves on double click
+    if (selection.empty() || !selection.contains(itemFocus))
+      itemFocus->moveTo(x-moveOffsX, y-moveOffsY);
+    else
+      {
+        // move the whole selection
+        auto deltaX=x-moveOffsX-itemFocus->x(), deltaY=y-moveOffsY-itemFocus->y();
+        for (auto& i: selection.items)
+          i->moveTo(i->x()+deltaX, i->y()+deltaY);
+        for (auto& i: selection.groups)
+          i->moveTo(i->x()+deltaX, i->y()+deltaY);
+      }
+    requestRedraw();
+    // check if the move has moved outside or into a group
+    if (auto g=itemFocus->group.lock())
+      if (g==model || !g->contains(itemFocus->x(),itemFocus->y()))
+        {
+          if (auto toGroup=model->minimalEnclosingGroup
+              (itemFocus->x(),itemFocus->y(),itemFocus->x(),itemFocus->y(),itemFocus.get()))
+            {
+              if (g.get()==toGroup) return;
+              // prevent moving a group inside itself
+              if (auto g=dynamic_cast<Group*>(itemFocus.get()))
+                if (g->higher(*toGroup))
+                  return;
+              selection.clear(); // prevent old wires from being held onto
+              toGroup->addItem(itemFocus);
+              toGroup->splitBoundaryCrossingWires();
+              g->splitBoundaryCrossingWires();
+            }
+          else if (g!=model)
+            {
+              selection.clear(); // prevent old wires from being held onto
+              model->addItem(itemFocus);
+              model->splitBoundaryCrossingWires();
+              g->splitBoundaryCrossingWires();
+            }
+        }
+    if (auto g=itemFocus->group.lock())
+      if (g!=model)
+        g->checkAddIORegion(itemFocus);
   }
   
   void Canvas::mouseMove(float x, float y)
     try
       {
+        if (rotatingItem && item)
+          {
+            item->rotate(Point{x,y},rotateOrigin);
+            requestRedraw();
+            return;
+          }
+        
         if (itemFocus)
           {
             switch (clickType)
               {
               case ClickType::onItem:
-                updateRegion=LassoBox(itemFocus->x(),itemFocus->y(),x,y);
-                // move item relatively to avoid accidental moves on double click
-                if (selection.empty() || !selection.contains(itemFocus))
-                  itemFocus->moveTo(x-moveOffsX, y-moveOffsY);
-                else
-                  {
-                    // move the whole selection
-                    auto deltaX=x-moveOffsX-itemFocus->x(), deltaY=y-moveOffsY-itemFocus->y();
-                    for (auto& i: selection.items)
-                      i->moveTo(i->x()+deltaX, i->y()+deltaY);
-                    for (auto& i: selection.groups)
-                      i->moveTo(i->x()+deltaX, i->y()+deltaY);
-                  }
-                // check if the move has moved outside or into a group
-                if (auto g=itemFocus->group.lock())
-                  if (g==model || !g->contains(itemFocus->x(),itemFocus->y()))
-                    {
-                      if (auto toGroup=model->minimalEnclosingGroup
-                          (itemFocus->x(),itemFocus->y(),itemFocus->x(),itemFocus->y(),itemFocus.get()))
-                        {
-                          // prevent moving a group inside itself
-                          if (auto g=dynamic_cast<Group*>(itemFocus.get()))
-                            if (g->higher(*toGroup))
-                              return;
-                          toGroup->addItem(itemFocus);
-                          toGroup->splitBoundaryCrossingWires();
-                          g->splitBoundaryCrossingWires();
-                        }
-                      else
-                        {
-                          model->addItem(itemFocus);
-                          model->splitBoundaryCrossingWires();
-                          g->splitBoundaryCrossingWires();
-                        }
-                    }
-                if (auto g=itemFocus->group.lock())
-                  g->checkAddIORegion(itemFocus);
-                requestRedraw();
-                return;
-              case ClickType::onSlider:
-                if (auto v=itemFocus->variableCast())
-                  {
-                    RenderVariable rv(*v);
-                    double rw=fabs(v->zoomFactor()*(rv.width()<v->iWidth()? 0.5*v->iWidth() : rv.width())*cos(v->rotation()*M_PI/180));
-                    double sliderPos=(x-v->x())* (v->sliderMax-v->sliderMin)/rw+0.5*(v->sliderMin+v->sliderMax);
-                    double sliderHatch=sliderPos-fmod(sliderPos,v->sliderStep);   // matches slider's hatch marks to sliderStep value. for ticket 1258
-                    v->sliderSet(sliderHatch);
-                    // push History to prevent an unnecessary reset when
-                    // adjusting the slider whilst paused. See ticket #812
-                    minsky().pushHistory();
-                    if (minsky().reset_flag())
-                      minsky().reset();
-                    minsky().evalEquations();
-                    requestRedraw();
-                  }
+                mouseMoveOnItem(x,y);
                 return;
               case ClickType::inItem:
                 if (itemFocus->onMouseMotion(x,y))
@@ -279,7 +296,13 @@ namespace minsky
           }
         else
           {
+            auto setFlagAndRequestRedraw=[&](bool& flag, bool cond) {
+              if (flag==cond) return;
+              flag=cond;
+              requestRedraw();
+            };
             // set mouse focus to display ports etc.
+            bool mouseFocusSet=false; // ensure only one item is focused by mouse.
             model->recursiveDo(&Group::items, [&](Items&,Items::iterator& i)
                                               {
                                                 (*i)->disableDelayedTooltip();
@@ -293,39 +316,23 @@ namespace minsky
                                                 else
                                                   {
                                                     auto ct=(*i)->clickType(x,y);
-                                                    if (ct==ClickType::inItem)
-                                                      {
-                                                        (*i)->mouseFocus=true;
-                                                        (*i)->onBorder = false;
-                                                        if ((*i)->onMouseOver(x,y))
-                                                          requestRedraw();
-                                                      }
-                                                    else
-                                                      {
-                                                        auto mf = ct!=ClickType::outside;
-                                                        if ((*i)->mouseFocus!=mf)
-                                                          {
-                                                            requestRedraw();
-                                                            (*i)->mouseFocus=mf;
-                                                          }
-                                                        (*i)->onResizeHandles=ct==ClickType::onResize;
-                                                        (*i)->onBorder = ct==ClickType::onItem;
+                                                    setFlagAndRequestRedraw((*i)->mouseFocus, !mouseFocusSet && ct!=ClickType::outside);
+                                                    if ((*i)->mouseFocus) mouseFocusSet=true;
+                                                    setFlagAndRequestRedraw((*i)->onResizeHandles, ct==ClickType::onResize);
+                                                    setFlagAndRequestRedraw((*i)->onBorder, ct==ClickType::onItem);
+                                                    if (ct==ClickType::outside)
                                                         (*i)->onMouseLeave();
-                                                        requestRedraw();
-                                                      }
+                                                    else if ((*i)->onMouseOver(x,y))
+                                                      requestRedraw();
                                                   }
                                                 return false;
                                               });
             model->recursiveDo(&Group::groups, [&](Groups&,Groups::iterator& i)
                                                {
                                                  auto ct=(*i)->clickType(x,y);
-                                                 bool mf=ct!=ClickType::outside;
-                                                 if (mf!=(*i)->mouseFocus)
-                                                   {
-                                                     (*i)->mouseFocus=mf;
-                                                     requestRedraw();
-                                                   }
-                                                 bool onResize = ct==ClickType::onResize;
+                                                 setFlagAndRequestRedraw((*i)->mouseFocus, !mouseFocusSet && ct!=ClickType::outside);
+                                                 if ((*i)->mouseFocus) mouseFocusSet=true;
+                                                 const bool onResize = ct==ClickType::onResize;
                                                  if (onResize!=(*i)->onResizeHandles)
                                                    {
                                                      (*i)->onResizeHandles=onResize;
@@ -335,7 +342,7 @@ namespace minsky
                                                });
             model->recursiveDo(&Group::wires, [&](Wires&,Wires::iterator& i)
                                               {
-                                                bool mf=(*i)->near(x,y);
+                                                const bool mf=(*i)->near(x,y);
                                                 if (mf!=(*i)->mouseFocus)
                                                   {
                                                     (*i)->mouseFocus=mf;
@@ -344,14 +351,17 @@ namespace minsky
                                                 return false;
                                               });
           }
+        if (minsky().reset_flag())
+          minsky().resetAt=std::chrono::system_clock::now()+std::chrono::milliseconds(1500); // postpone reset whilst mousing
       }
     catch (...) {/* absorb any exceptions, as they're not useful here */}
 
-  bool Canvas::keyPress(int keySym, const std::string& utf8, int state, float x, float y)
+  bool Canvas::keyPress(const KeyPressArgs& args)
   {
-    if (auto item=itemAt(x,y))
-      if (item->onKeyPress(keySym, utf8, state))
+    if (auto item=itemAt(args.x,args.y))
+      if (item->onKeyPress(args.keySym, args.utf8, args.state))
         {
+          minsky().markEdited(); // keyPresses don't set the dirty flag by default
           requestRedraw();
           return true;
         }
@@ -384,10 +394,21 @@ namespace minsky
       if (i->visible() && lasso.intersects(*i))
         selection.ensureGroupInserted(i);
 
-    if (focusFollowsMouse)
-      minsky().copy();
+    // X11 behaviour, selecting automatically copies.
+    minsky().copy();
   }
 
+  int Canvas::ravelsSelected() const
+  {
+    int ravelsSelected = 0;
+    for (auto& i: selection.items) {
+      if (dynamic_pointer_cast<Ravel>(i))
+      {
+        ravelsSelected++;
+      }
+    }
+    return ravelsSelected;
+  }
   
   ItemPtr Canvas::itemAt(float x, float y)
   {
@@ -397,7 +418,7 @@ namespace minsky
     model->recursiveDo(&GroupItems::items,
                        [&](const Items&, Items::const_iterator i)
                        {
-                          float d=sqr((*i)->x()-x)+sqr((*i)->y()-y);
+                          const float d=sqr((*i)->x()-x)+sqr((*i)->y()-y);
                           if (d<minD && (*i)->visible() && (*i)->contains(x,y))
                             {
                               minD=d;
@@ -412,21 +433,22 @@ namespace minsky
     return item;
   }
   
-  void Canvas::getWireAt(float x, float y)
+  bool Canvas::getWireAt(float x, float y)
   {
     wire=model->findAny(&Group::wires,
                         [&](const WirePtr& i){return i->near(x,y);});
+    return wire.get();
   }
 
   void Canvas::groupSelection()
   {
-    GroupPtr r=model->addGroup(new Group);
+    const GroupPtr r=model->addGroup(new Group);
     for (auto& i: selection.items)
       r->addItem(i);
     for (auto& i: selection.groups)
       r->addItem(i);
-    r->resizeOnContents();
     r->splitBoundaryCrossingWires();
+    r->resizeOnContents();
   }
 
   void Canvas::lockRavelsInSelection()
@@ -440,7 +462,7 @@ namespace minsky
           ravelsToLock.push_back(r);
           if (!lockGroup)
             lockGroup=r->lockGroup;
-          if (lockGroup!=r->lockGroup)
+          if (r->lockGroup && lockGroup!=r->lockGroup)
             conflictingLockGroups=true;
         }
     if (ravelsToLock.size()<2)
@@ -454,6 +476,7 @@ namespace minsky
         r->lockGroup=lockGroup;
       }
     if (lockGroup) lockGroup->initialBroadcast();
+    selection.clear();
   }
 
   void Canvas::unlockRavelsInSelection()
@@ -463,67 +486,23 @@ namespace minsky
         r->leaveLockGroup();
   }
   
-  void Canvas::pushDefiningVarsToTab()
-  {
-    for (auto& i: selection.items)
-      {
-        auto v=i->variableCast();
-        if (v && v->defined() && !v->varTabDisplay) {
-          itemVector.push_back(i);
-          v->toggleVarTabDisplay();	  
-        }
-      }
-  }
-  
-  void Canvas::showDefiningVarsOnCanvas()
-  {
-    for (auto& i: itemVector)
-      {
-        auto v=(*i).variableCast();
-        if (v && v->defined() && v->varTabDisplay)
-          v->toggleVarTabDisplay();	  
-      }
-    // ensure individual hidden defining vars can be made visible once more. for ticket 145.
-    if (itemVector.empty())
-	{
-        model->recursiveDo
-          (&GroupItems::items, [&](const Items&,Items::const_iterator i)
-           {
-             if (auto v=(*i)->variableCast())
-               if (v->defined() && v->varTabDisplay)
-				 v->toggleVarTabDisplay();	 
-             return false;
-           });
-	}      
-    itemVector.clear();  
-  }
-  
-  void Canvas::showPlotsOnTab()
-  {
-     model->recursiveDo
-       (&GroupItems::items, [&](const Items&,Items::const_iterator i)
-        {
-          if (auto p=(*i)->plotWidgetCast())
-            if (!p->plotOnTab()) p->togglePlotTabDisplay();	 
-          return false;
-        });
-  }    
-  
   void Canvas::deleteItem()
   {
     if (item)
-      {
-        model->deleteItem(*item);
-        requestRedraw();
-      }
+    {
+      model->deleteItem(*item);
+      minsky().requestReset();
+    }
   }
   
   void Canvas::deleteWire()
   {
     if (wire)
+    {
       model->removeWire(*wire);
-    wire.reset();
-    requestRedraw();
+      wire.reset();
+      minsky().requestReset();
+    }
   }
   
   // For ticket 1092. Reinstate delete handle user interaction
@@ -570,22 +549,14 @@ namespace minsky
              if (auto v=(*i)->variableCast())
                if (v->valueId()==var->valueId())
                  {
-                   selection.items.push_back(*i);
-                   v->selected=true;
+                   selection.ensureItemInserted(*i);
                  }
              return false;
            });
        }
   }
 
-  namespace
-  {
-    // return true if scope g refers to the global model group
-    bool isGlobal(const GroupPtr& g)
-    {return !g || g==cminsky().model;}
-  }
-  
-  void Canvas::renameAllInstances(const string newName)
+  void Canvas::renameAllInstances(const string& newName)
   {
     auto var=item->variableCast();
     if (!var)
@@ -595,60 +566,7 @@ namespace minsky
       {
         // cache name and valueId for later use as var gets invalidated in the recursiveDo
         auto valueId=var->valueId();
-        auto varScope=VariableValue::scope(var->group.lock(), valueId);
-        string fromName=var->rawName();
-        // unqualified versions of the names
-        string uqFromName=fromName.substr(fromName[0]==':'? 1: 0);
-        string uqNewName = newName.substr(newName[0]==':'? 1: 0);
-        set<GodleyIcon*> godleysToUpdate;
-#ifndef NDEBUG
-        auto numItems=model->numItems();
-#endif
-        model->recursiveDo
-          (&GroupItems::items, [&](Items&,Items::iterator i)
-           {
-             if (auto v=(*i)->variableCast())
-               if (v->valueId()==valueId)
-                 {			 
-                   if (auto g=dynamic_cast<GodleyIcon*>(v->controller.lock().get()))
-                     {
-                       if (varScope==g->group.lock() ||
-                           (!varScope && g->group.lock()==cminsky().model)) // fix local variables
-                         g->table.rename(uqFromName, uqNewName);
-                       
-                       // scope of an external ref in the Godley Table
-                       auto externalVarScope=VariableValue::scope(g->group.lock(), ':'+uqNewName);
-                       // if we didn't find it, perhaps the outerscope variable hasn't been changed
-                       if (!externalVarScope)
-                         externalVarScope=VariableValue::scope(g->group.lock(), ':'+uqFromName);
-
-                       if (varScope==externalVarScope ||  (isGlobal(varScope) && isGlobal(externalVarScope)))
-                         // fix external variable references
-                         g->table.rename(':'+uqFromName, ':'+uqNewName);
-                       // GodleyIcon::update invalidates the iterator, so postpone update
-                       godleysToUpdate.insert(g);
-                     }
-                   else
-                     {
-                       if (varScope==v->group.lock() ||
-                           (!newName.empty() && newName[0]==':') )
-                         v->name(newName);
-                       else
-                         v->name(":"+newName);
-                       if (auto vv=v->vValue()) {
-                        v->retype(vv->type()); // ensure correct type. Note this invalidates v.
-                       }
-                     }
-                 }
-             return false;
-           });
-        assert(model->numItems()==numItems);
-        for (auto g: godleysToUpdate)
-          {
-            g->update();
-            assert(model->numItems()==numItems);
-          }
-      minsky().reset();   // Updates model after variables rename. For ticket 1109.    
+        model->renameAllInstances(valueId, newName);
       }
    }
   
@@ -667,7 +585,13 @@ namespace minsky
                   if (v && v->type()==VariableType::parameter) 
                     existingParms.emplace(v->valueId(),v->init());
                 }
-		       
+
+                // blow up containe items so they appear in same relative locationsat parent scalefactor
+                auto scaleFactor=1/g->relZoom;
+                for (auto& i: g->items)
+                  i->moveTo((i->x()-g->x())*scaleFactor+g->x(), (i->y()-g->y())*scaleFactor+g->y());
+                for (auto& i: g->groups)
+                  i->moveTo((i->x()-g->x())*scaleFactor+g->x(), (i->y()-g->y())*scaleFactor+g->y());
                 p->moveContents(*g);
                 deleteItem();
                	    
@@ -682,6 +606,7 @@ namespace minsky
 
   void Canvas::renameItem(const std::string& newName)
   {
+    if (!item) return;
     if (auto var=item->variableCast())
       {
         var->name(newName);
@@ -730,6 +655,44 @@ namespace minsky
       }
   }
 
+  void Canvas::zoomToFit()
+  {
+    if (frameArgs().parentWindowId.empty()) return; // no window to fit to, so do nothing
+    // recompute all bounding boxes - why is this needed?
+    for (auto& i: model->items) i->updateBoundingBox();
+    
+    double x0,x1,y0,y1;
+    model->contentBounds(x0,y0,x1,y1);
+    float inOffset=0, outOffset=0;
+    const bool notFlipped=!flipped(model->rotation());
+    const float flip=notFlipped? 1: -1;
+                                                         
+    // we need to move the io variables
+    for (auto& v: model->inVariables)
+      inOffset=std::max(inOffset, v->width());
+    for (auto& v: model->outVariables)
+      outOffset=std::max(outOffset, v->width());
+        
+    const float zoomFactor=std::min(frameArgs().childWidth/(x1-x0+inOffset+outOffset),
+                              frameArgs().childHeight/(y1-y0));
+        
+    model->zoom(model->x(),model->y(),zoomFactor);
+
+        
+    model->contentBounds(x0,y0,x1,y1);
+    float ioOffset=notFlipped? x0: x1;
+                                                          
+    // we need to move the io variables
+    for (auto& v: model->inVariables)
+      v->moveTo(ioOffset-flip*v->width(),v->y());
+    ioOffset=notFlipped? x1: x0;                                               
+    for (auto& v: model->outVariables)
+      v->moveTo(ioOffset+flip*v->width(),v->y());
+       
+    recentre();
+    requestRedraw();
+  }
+  
   void Canvas::openGroupInCanvas(const ItemPtr& item)
   {
     if (auto g=dynamic_pointer_cast<Group>(item))
@@ -737,40 +700,28 @@ namespace minsky
         if (auto parent=model->group.lock())
           model->setZoom(parent->zoomFactor());
         model=g;
-        float zoomFactor=1.1*model->displayZoom;
-        if (!model->displayContents())
-          {
-            // we need to move the io variables
-            for (auto& v: model->inVariables)
-              {
-                float x=v->x(), y=v->y();
-                zoom(x,model->x(),zoomFactor);
-                zoom(y,model->y(),zoomFactor);
-                v->moveTo(x,y);
-              }
-            for (auto& v: model->outVariables)
-              {
-                float x=v->x(), y=v->y();
-                zoom(x,model->x(),zoomFactor);
-                zoom(y,model->y(),zoomFactor);
-                v->moveTo(x,y);
-              }
-          }
-        model->zoom(model->x(),model->y(),zoomFactor);
+        zoomToFit();
+
+        minsky().bookmarkRefresh();
+        this->item.reset();
+        itemFocus.reset();
+        wire.reset();
+        selection.clear();
+        fromPort.reset();
         requestRedraw();
       }
   }
 
   void Canvas::copyVars(const std::vector<VariablePtr>& v)
   {
-    float maxWidth=0, totalHeight=0, yCentre=0;
+    float maxWidth=0, totalHeight=0;
     vector<float> widths, heights;
     // Throw error if no stock/flow vars on Godley icon. For ticket 1039 
     if (!v.empty()) {    
 	  selection.clear();	
       for (auto& i: v)
         {
-          RenderVariable rv(*i);
+          const RenderVariable rv(*i);
           widths.push_back(rv.width());
           heights.push_back(rv.height());
           maxWidth=max(maxWidth, widths.back());
@@ -780,7 +731,7 @@ namespace minsky
       for (size_t i=0; i<v.size(); ++i)
         {
 		  // Stock and flow variables on Godley icons should not be copied as groups. For ticket 1039	
-          ItemPtr ni(v[i]->clone());
+          const ItemPtr ni(v[i]->clone());
           (ni->variableCast())->rotation(0);
           ni->moveTo(v[0]->x()+maxWidth-v[i]->zoomFactor()*widths[i],
                      y+heights[i]);
@@ -799,7 +750,10 @@ namespace minsky
   void Canvas::zoomToDisplay()
   {
     if (auto g=dynamic_cast<Group*>(item.get()))
-      model->zoom(g->x(),g->y(),1.1/(g->relZoom*g->zoomFactor()));
+      {
+        model->zoom(g->x(),g->y(),1.1/(g->relZoom*g->zoomFactor()));
+        minsky().resetScroll();
+      }
   }
 
   bool Canvas::selectVar(float x, float y) 
@@ -821,9 +775,9 @@ namespace minsky
       {
         if (iv->type()==VariableType::constant ||
             iv->type()==VariableType::parameter || iv->inputWired())
-          return true;
+          return (itemIndicator=item).get();
         
-        auto def=model->findAny
+        itemIndicator=model->findAny
           (&GroupItems::items, [&](const ItemPtr& i) {
             if (auto v=i->variableCast())
               return v->inputWired() && v->valueId()==iv->valueId();
@@ -837,9 +791,7 @@ namespace minsky
               return o->intVar->valueId()==iv->valueId();
             return false;
           });
-        if (def)
-          item=def;
-        return def.get();
+        return itemIndicator.get();
       }
     return false;
   }
@@ -853,7 +805,7 @@ namespace minsky
     // redraw of canvas may throw if called during a reset operation
     try
       {
-        redrawUpdateRegion();
+        return redrawUpdateRegion();
       }
 #ifndef NDEBUG
     catch (std::exception& ex)
@@ -867,20 +819,24 @@ namespace minsky
         // this leads to an endless loop...
         //requestRedraw();
       }
-    return true;
+    return false;
   }
   
-  void Canvas::redraw()
+  bool Canvas::redraw()
   {
     // nb using maxint here doesn't seem to work
-    redraw(-1e9,-1e9,2e9,2e9);
+    return redraw(-1e6,-1e6,2e6,2e6);
   }
 
-  void Canvas::redrawUpdateRegion()
+  bool Canvas::redrawUpdateRegion()
   {
-    if (!surface().get()) return;
+    bool didDrawSomething = false;
+    if (!surface().get()) {
+      return didDrawSomething;
+    }
+    m_redrawRequested=false;
     auto cairo=surface()->cairo();
-    CairoSave cs(cairo);
+    const CairoSave cs(cairo);
     cairo_rectangle(cairo,updateRegion.x0,updateRegion.y0,updateRegion.x1-updateRegion.x0,updateRegion.y1-updateRegion.y0);
     cairo_clip(cairo);
     cairo_set_line_width(cairo, 1);
@@ -891,10 +847,19 @@ namespace minsky
          auto& it=**i;
          if (it.visible() && updateRegion.intersects(it))
            {
-             CairoSave cs(cairo);
+             didDrawSomething = true;
+             const CairoSave cs(cairo);
              cairo_identity_matrix(cairo);
              cairo_translate(cairo,it.x(), it.y());
-             it.draw(cairo);
+             try
+               {
+                 CairoShimCairo shim(cairo);
+                 it.draw(shim);
+               }
+             catch (const std::exception& ex)
+               {
+                 cerr << ex.what() << endl;
+               }
            }
          return false;
        });
@@ -906,10 +871,14 @@ namespace minsky
          auto& it=**i;
          if (it.visible() && updateRegion.intersects(it))
            {
-             CairoSave cs(cairo);
+             didDrawSomething = true;
+             const CairoSave cs(cairo);
              cairo_identity_matrix(cairo);
              cairo_translate(cairo,it.x(), it.y());
-             it.draw(cairo);
+             {
+               CairoShimCairo shim(cairo);
+               it.draw(shim);
+             }
            }
          return false;
        });
@@ -920,18 +889,21 @@ namespace minsky
       (&GroupItems::wires, [&](const Wires&, Wires::const_iterator i)
        {
          const Wire& w=**i;
-         if (w.visible()/* && updateRegion.intersects(w)*/)
-           w.draw(cairo);
+         if (w.visible()) {
+           CairoShimCairo shim(cairo);
+           w.draw(shim);
+         }
          return false;
        });
 
     if (fromPort.get()) // we're in process of creating a wire
       {
+        didDrawSomething = true;
         cairo_move_to(cairo,fromPort->x(),fromPort->y());
         cairo_line_to(cairo,termX,termY);
         cairo_stroke(cairo);
         // draw arrow
-        CairoSave cs(cairo);
+        const CairoSave cs(cairo);
         cairo_translate(cairo, termX,termY);
         cairo_rotate(cairo,atan2(termY-fromPort->y(), termX-fromPort->x()));
         cairo_move_to(cairo,0,0);
@@ -944,24 +916,26 @@ namespace minsky
 
     if (lassoMode!=LassoMode::none)
       {
+        didDrawSomething = true;
         cairo_rectangle(cairo,lasso.x0,lasso.y0,lasso.x1-lasso.x0,lasso.y1-lasso.y0);
         cairo_stroke(cairo);
       }
 
-    if (itemIndicator && item) // draw a red circle to indicate an error or other marker
+    if (itemIndicator) // draw a red circle to indicate an error or other marker
       {
-        CairoSave cs(surface()->cairo());
+        const CairoSave cs(surface()->cairo());
         cairo_set_source_rgb(surface()->cairo(),1,0,0);
-        cairo_arc(surface()->cairo(),item->x(),item->y(),15,0,2*M_PI);
+        cairo_arc(surface()->cairo(),itemIndicator->x(),itemIndicator->y(),15,0,2*M_PI);
         cairo_stroke(surface()->cairo());
       }
 
     surface()->blit();
+    return didDrawSomething;
   }
 
   void Canvas::recentre()
   {
-    SurfacePtr tmp(surface());
+    const SurfacePtr tmp(surface());
     surface().reset(new Surface(cairo_recording_surface_create(CAIRO_CONTENT_COLOR,nullptr)));
     redraw();
     model->moveTo(model->x()-surface()->left(), model->y()-surface()->top());
@@ -974,6 +948,39 @@ namespace minsky
     // ensure screen refresh time is less than a third
     minsky().maxWaitMS=(t>0.03)? 3000*t: 100.0;
   }
-  
+
+    void Canvas::renderToPNGCropped(const std::string& filename, const ZoomCrop& z)
+  {
+    model->zoom(model->x(),model->y(),z.zoom);
+    model->moveTo(model->x()-z.left,model->y()-z.top);
+    cairo::SurfacePtr tmp(new cairo::Surface(cairo_image_surface_create(CAIRO_FORMAT_ARGB32,z.width,z.height)));
+    tmp.swap(surface());
+    redraw(0,0,z.width,z.height);
+    tmp.swap(surface());
+    cairo_surface_write_to_png(tmp->surface(),filename.c_str());
+    model->moveTo(model->x()+z.left,model->y()+z.top);
+    model->zoom(model->x(),model->y(),1/z.zoom);
+  }
+
+
+
+  void Canvas::applyDefaultPlotOptions() {
+      if (auto p=item->plotWidgetCast()) {
+        // stash titles to restore later
+        const string title(p->title), xlabel(p->xlabel()),
+          ylabel(p->ylabel()), y1label(p->y1label());
+        defaultPlotOptions.applyPlotOptions(*p);
+        p->title=title, p->xlabel(xlabel),
+          p->ylabel(ylabel), p->y1label(y1label);
+      }
+    }
+
+  void Canvas::setItemFromItemFocus()
+  {
+    item = itemFocus;
+  }
 }
 
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::EventInterface);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Canvas);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Canvas::ZoomCrop);

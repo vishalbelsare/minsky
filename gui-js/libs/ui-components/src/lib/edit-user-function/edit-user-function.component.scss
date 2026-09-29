@@ -1,0 +1,53 @@
+@use '../../../../shared/src/lib/theme/common-style' as *;
+
+select {
+  width: 125px;
+}
+
+button {
+  margin: 5px;
+}
+
+.form-control {
+  span {
+    min-width: 250px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+}
+
+form {
+  height: 100vh;
+
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: stretch;
+
+  overflow: hidden;
+
+  .form-title {
+    padding: 10px;
+    margin: 0px;
+    font-weight: bold;
+    flex: 0;
+  }
+
+  .form-body {
+    flex: 1;
+
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .form-buttons {
+    margin: 0px;
+    flex: 0;
+  }
+}

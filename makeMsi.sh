@@ -20,7 +20,7 @@ if [ $numFields -le 1 ]; then
     else
         upgradeId=01a8458a-5fb5-49e6-a459-531a16e2ea01
         productName=Minsky
-        license=license.rtf
+        license=license_.rtf
     fi
 else
     # remove last digit, and add in beta
@@ -37,7 +37,7 @@ else
     else
         upgradeId=cba7e03a-c692-400d-9c75-2da0307c3efc
         productName=MinskyBeta
-        license=license.rtf
+        license=license_.rtf
     fi
 fi
 
@@ -87,10 +87,21 @@ if [ $productName = "Minsky" -o $productName = "Ravel" -o $productName = "RavelB
                </ProgId>
 EOF
 fi
-pushd gui-tk
 id=0
 fid=0
 # add in plain files
+pushd RESTService
+for i in *.exe; do
+	if [ -f $i -a ! -d $i ]; then
+	    let fid++
+	    cat >>$minskyWxs <<EOF
+	<File Id='fid$fid' Source='RESTService/$i' Name='$i' KeyPath='no' />
+EOF
+        fi
+done
+popd
+
+pushd gui-tk
 for i in *.tcl *.dll accountingRules; do
 	if [ -f $i -a ! -d $i -a $i != "minsky.exe" ]; then
 	    let fid++
@@ -99,6 +110,9 @@ for i in *.tcl *.dll accountingRules; do
 EOF
         fi
 done
+
+
+
 echo "    </Component>">> $minskyWxs
 builddir ()
 {

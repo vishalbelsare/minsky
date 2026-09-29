@@ -30,7 +30,7 @@ namespace minsky
   {
     const char* what() const throw() {return "Falling back to scalar processing";}
   };
-
+  
   /// A place to store common data shared between TensorVarVals within a give calculation
   class EvalCommon
   {
@@ -111,6 +111,7 @@ namespace minsky
       value(vv), ev(ev) {}
     const Hypercube& hypercube() const override {return value->hypercube();}
     const Index& index() const override {return value->index();}
+    using I::index;
     std::size_t size() const override {return value->size();}
    
     double dFlow(std::size_t ti, std::size_t fi) const override 
@@ -126,7 +127,7 @@ namespace minsky
     TensorVarVal(const std::shared_ptr<VariableValue>& vv, const shared_ptr<EvalCommon>& ev):
       TensorVarValBase<VariableValue,ITensorVal>(vv,ev) {}
     using ITensorVal::index;
-    const Index& index(Index&& x) override {return value->index(move(x));}
+    const Index& index(Index&& x) override {return value->index(std::move(x));}
     const Index& index() const override {return value->index();}
     const Hypercube& hypercube(const Hypercube& hc) override {return value->hypercube(hc);}
     const Hypercube& hypercube(Hypercube&& hc) override {return value->hypercube(std::move(hc));}
@@ -140,11 +141,16 @@ namespace minsky
              || value->idx()+i<ev->fvSize());
       return ev->flowVars()[value->idx()+i];
     }
-    TensorVarVal& operator=(const ITensor& t) override {
-      *value=t;
+    TensorVarVal& asg(const ITensor& t) override {
+      index(t.index());
+      hypercube(t.hypercube());
+      for (size_t i=0; i<size(); ++i)
+        operator[](i)=t[i];
+      // update timestamp
       ev->update(ev->flowVars(), ev->fvSize(), ev->stockVars());
       return *this;
     }
+    TensorVarVal& operator=(const ITensor& t) {return asg(t);}
   };
 
   
@@ -161,14 +167,17 @@ namespace minsky
     TensorEval(const std::shared_ptr<VariableValue>& v, const shared_ptr<EvalCommon>& ev,
                const TensorPtr& rhs): result(v, ev), rhs(rhs) {
       result.index(rhs->index());
+      assert(!rhs->index().empty() || rhs->hypercube().numElements()==rhs->size());
       result.hypercube(rhs->hypercube());
       assert(result.idx()>=0);
       assert(result.size()==rhs->size());
     } 
     TensorEval(const std::shared_ptr<VariableValue>& dest, const std::shared_ptr<VariableValue>& src);
-               
-    void eval(double fv[], std::size_t,const double sv[]) override;
-    void deriv(double df[],std::size_t,const double ds[],const double sv[],const double fv[]) override;
+
+    // pointer arguments are array arguments
+    void eval(double* fv, std::size_t,const double* sv) override;
+    // pointer arguments are array arguments
+    void deriv(double* df,std::size_t,const double* ds,const double* sv,const double* fv) override;
   };
 }
   

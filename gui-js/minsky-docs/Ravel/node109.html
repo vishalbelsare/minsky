@@ -1,0 +1,112 @@
+
+<!--Converted with LaTeX2HTML 2025 (Released January 1, 2025) -->
+<HTML lang="en">
+<HEAD>
+<TITLE>difference </TITLE>
+
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-15">
+<META NAME="viewport" CONTENT="width=device-width, initial-scale=1.0">
+<META NAME="Generator" CONTENT="LaTeX2HTML v2025">
+
+<LINK REL="STYLESHEET" HREF="Ravel.css">
+
+<LINK REL="next" HREF="node110.html">
+<LINK REL="previous" HREF="node108.html">
+<LINK REL="next" HREF="node110.html">
+</HEAD>
+
+<BODY  bgcolor="#ffffff">
+<!--Navigation Panel-->
+<A
+ HREF="node110.html">
+<IMG WIDTH="37" HEIGHT="24" ALT="next" SRC="next.png"></A> 
+<A
+ HREF="node98.html">
+<IMG WIDTH="26" HEIGHT="24" ALT="up" SRC="up.png"></A> 
+<A
+ HREF="node108.html">
+<IMG WIDTH="63" HEIGHT="24" ALT="previous" SRC="prev.png"></A> 
+<A ID="tex2html883"
+  HREF="Ravel.html">
+<IMG WIDTH="65" HEIGHT="24" ALT="contents" SRC="contents.png"></A>  
+<BR>
+<B> Next:</B> <A
+ HREF="node110.html">inner product</A>
+<B> Up:</B> <A
+ HREF="node98.html">Tensor operations</A>
+<B> Previous:</B> <A
+ HREF="node108.html">running product</A>
+ &nbsp; <B>  <A ID="tex2html884"
+  HREF="Ravel.html">Contents</A></B> 
+<BR>
+<BR>
+<!--End of Navigation Panel-->
+
+<H3><A ID="SECTION0042131100000000000000">
+difference <IMG
+ STYLE="height: 2.38ex; vertical-align: -0.57ex; " SRC="img22.png"
+ ALT="$\Delta ^{-},\Delta ^{+}$% WIDTH=110 HEIGHT=34 "></A>
+</H3>
+
+<P>
+<A ID="Operation:difference"></A><A ID="Operation:differencePlus"></A> Computes
+the nearest neighbour difference along a given direction.
+
+<P>
+
+    <IMG
+  STYLE="height: 6.50ex; vertical-align: -0.12ex; " SRC="img153.png"
+ ALT="\includegraphics[height=10mm]{images/difference}% WIDTH=48 HEIGHT=45 ">
+
+    <IMG
+  STYLE="height: 6.50ex; vertical-align: -0.12ex; " SRC="img154.png"
+ ALT="\includegraphics[height=10mm]{images/differencePlus}% WIDTH=48 HEIGHT=45 ">
+
+<P>
+These operators can be placed on the canvas in two ways:
+
+<UL>
+<LI>From the <I>Scan Operations (``scan'')</I> toolbar 
+  <IMG
+  STYLE="height: 2.03ex; vertical-align: -0.12ex; " SRC="img143.png"
+ ALT="\resizebox{!}{2ex}{\includegraphics{images/runningSum}}% WIDTH=15 HEIGHT=14 ">
+  ;
+or 
+</LI>
+<LI>By typing the letters ``difference'' or ``differencePlus''
+on the canvas and then pressing the Enter key.
+</LI>
+</UL>
+The optional argument (<IMG
+ STYLE="height: 1.75ex; vertical-align: -0.12ex; " SRC="img149.png"
+ ALT="$\delta$% WIDTH=14 HEIGHT=25 ">) can be used to specify the number
+of neighbours to skip in computing the differences. For example if
+your data is monthly and you want to calculate changes per year, you
+would set <IMG
+ STYLE="height: 1.75ex; vertical-align: -0.12ex; " SRC="img149.png"
+ ALT="$\delta$% WIDTH=14 HEIGHT=25 "> to 12. The length of the dimension being differenced
+is reduced by <IMG
+ STYLE="height: 1.75ex; vertical-align: -0.12ex; " SRC="img149.png"
+ ALT="$\delta$% WIDTH=14 HEIGHT=25 "> in the result.
+
+<P>
+It comes in two different forms which differ only in how the resultant
+x-vector is calculated. <IMG
+ STYLE="height: 2.38ex; vertical-align: -0.76ex; " SRC="img150.png"
+ ALT="$\Delta_{i}^{-}=x_{i}-x_{i-\delta}$% WIDTH=225 HEIGHT=34 ">, and
+<IMG
+ STYLE="height: 2.73ex; vertical-align: -0.76ex; " SRC="img151.png"
+ ALT="$\Delta_{i}^{+}=x_{i+\delta}-x_{i}$% WIDTH=225 HEIGHT=39 ">, where <IMG
+ STYLE="height: 1.61ex; vertical-align: -0.12ex; " SRC="img152.png"
+ ALT="$i$% WIDTH=9 HEIGHT=23 "> refers to the x-vector
+index.
+
+<P>
+Where there is more than one dimension to data, the user needs to
+specify the axis along which the difference operation is calculated.
+
+<P>
+<BR><HR>
+
+</BODY>
+</HTML>

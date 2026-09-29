@@ -3,86 +3,78 @@
 # test that a simple integral example works when both coupled and uncoupled
 
 here=`pwd`
-if test $? -ne 0; then exit 2; fi
-tmp=/tmp/$$
-mkdir $tmp
-if test $? -ne 0; then exit 2; fi
-cd $tmp
-if test $? -ne 0; then exit 2; fi
+. $here/test/common-test.sh
 
-fail()
-{
-    echo "FAILED" 1>&2
-    cd $here
-    chmod -R u+w $tmp
-    rm -rf $tmp
-    exit 1
-}
+cat >input.py <<EOF
+from pyminsky import minsky, findObject
 
-pass()
-{
-    echo "PASSED" 1>&2
-    cd $here
-    chmod -R u+w $tmp
-    rm -rf $tmp
-    exit 0
-}
+# Step 1: Function to access value by ID
+def getValue(valueId):
+    try:
+        # Access valueId directly via minsky's interface
+        value = minsky.variableValues[valueId]
+        print(f"Found variable {valueId} with value: {value.value()}")
+        return value
+    except KeyError:
+        raise ValueError(f"Variable '{valueId}' not found in variableValues.")
+    except Exception as e:
+        raise ValueError(f"Error accessing variable '{valueId}': {e}")
 
-trap "fail" 1 2 3 15
+# Load the model
+minsky.load('$here/examples/exponentialGrowth.mky')
 
-cat >input.tcl <<EOF
-source $here/test/assert.tcl
+# Step 2: Verify initial value of ':y'
+y_value = getValue(":y")
+assert y_value.value() == 1, f"Expected initial value of :y to be 1, but got {y_value.value()}"
 
-# arrange for the following code to executed after Minsky has started.
-proc afterMinskyStarted {} {
-    # remove Destroy binding as it interferes with assert
-    bind . <Destroy> {}
+# Step 3: Find and check VarConstant
+findObject("VarConstant")
+var_constant_value = minsky.canvas.item.value()
+assert var_constant_value != 0, "VarConstant item value is unexpectedly 0."
+print(f"VarConstant value: {var_constant_value}")
 
-    minsky.load $here/examples/exponentialGrowth.mky
-    
-    getValue :y
-    assert {[value.value]==1}
+# Step 4: Advance simulation and verify updated ':y'
+def step():
+    """Advance the simulation by one step."""
+    minsky.step()
 
-    set item "minsky.canvas.item"
-    findObject VarConstant
-    set a [\$item.value]
-    assert {[minsky.canvas.item.value]!=0}
+# Run two simulation steps
+minsky.running = True
+minsky.reset()
+step()
+step()
 
-    # setting this flag prevents an extra reset occurring - used to
-    # distinguish between static plot updates and simulation
-    running 1 
-    minsky.reset
-    step
-    step  
-    getValue :y
-    assert {[value.value]>0}
-    if {\$a<0} {
-      assert {[value.value]>0 && [value.value]<1}
-    } else {
-      assert {[value.value]>0 && [value.value]>1}
-    }
+y_value_after_step = getValue(":y")
+assert y_value_after_step.value() > 0, "Value of :y after steps is not greater than 0."
 
-    set v [value.value]
+# Conditional check based on VarConstant value
+if var_constant_value < 0:
+    assert 0 < y_value_after_step.value() < 1, "Expected :y to be between 0 and 1 for negative VarConstant."
+else:
+    assert y_value_after_step.value() > 1, "Expected :y to be greater than 1 for positive VarConstant."
 
-    findObject IntOp
-    \$item.toggleCoupled
+stored_y_value = y_value_after_step.value()
 
-    minsky.reset
-    step
-    step
-    getValue :y
-    if {\$a<0} {
-      assert {[value.value]>0 && [value.value]<1}
-    } else {
-      assert {[value.value]>0 && [value.value]>1}
-    }
-    assert "\[value.value\]==\$v"
+# Step 5: Toggle coupling for IntOp
+findObject("IntOp")
+minsky.canvas.item.toggleCoupled()
+print("Toggled coupled state for IntOp.")
 
-    tcl_exit
-}
+# Step 6: Reset and rerun simulation
+minsky.reset()
+step()
+step()
 
+y_value_after_toggle = getValue(":y")
+if var_constant_value < 0:
+    assert 0 < y_value_after_toggle.value() < 1, "Expected :y to be between 0 and 1 for negative VarConstant."
+else:
+    assert y_value_after_toggle.value() > 1, "Expected :y to be greater than 1 for positive VarConstant."
+
+assert y_value_after_toggle.value() == stored_y_value, "Value of :y does not match after toggling coupled state."
 EOF
-$here/gui-tk/minsky input.tcl
-if test $? -ne 0; then fail; fi
+
+python3 input.py
+if [ $? -ne 0 ]; then fail; fi
 
 pass

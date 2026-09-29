@@ -17,17 +17,34 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "minsky.h"
+#include "cairoShimCairo.h"
 #include "geometry.h"
+#include "valueId.h"
 #include "variable.h"
 #include "cairoItems.h"
-#include "minsky.h"
 #include "equations.h"
-//#include "RESTProcess_base.h"
+#include "nobble.h"
+
+#include "CSVTools.xcd"
+#include "dimension.rcd"
+#include "engNotation.rcd"
+#include "hypercube.xcd"
+#include "index.xcd"
+#include "itemT.rcd"
+#include "slider.rcd"
+#include "tensorInterface.xcd"
+#include "tensorVal.rcd"
+#include "tensorVal.xcd"
+#include "variable.rcd"
+
 #include <error.h>
 #include "minsky_epilogue.h"
 
-#include <boost/regex.hpp>
+#include <algorithm>
+
 #include <boost/locale.hpp>
+#include <boost/filesystem.hpp>
 using namespace boost::locale::conv;
 
 using namespace classdesc;
@@ -35,20 +52,6 @@ using namespace ecolab;
 
 using namespace minsky;
 using namespace ecolab::cairo;
-
-namespace minsky
-{
- namespace VarAccessors
-  {
-    NameAccessor::NameAccessor(): ecolab::TCLAccessor<VariableBase,std::string,0>
-        ("name",(Getter)&VariableBase::name,(Setter)&VariableBase::name) {}
-    InitAccessor::InitAccessor(): ecolab::TCLAccessor<VariableBase,std::string,1>
-        ("init",(Getter)&VariableBase::init,(Setter)&VariableBase::init) {}
-    ValueAccessor::ValueAccessor(): ecolab::TCLAccessor<VariableBase,double>
-      ("value",(Getter)&VariableBase::value,(Setter)&VariableBase::value) {}
- }
-}
-
 
 void VariableBase::addPorts()
 {
@@ -65,7 +68,9 @@ void VariableBase::addPorts()
 
 bool VariableBase::inputWired() const
 {
-  return m_ports.size()>1 && !m_ports[1]->wires().empty();
+  if (auto p=ports(1).lock())
+    return !p->wires().empty();
+  return false;
 }
 
 std::vector<std::string> VariableBase::accessibleVars() const
@@ -76,21 +81,19 @@ std::vector<std::string> VariableBase::accessibleVars() const
 }
 
 
-ClickType::Type VariableBase::clickType(float xx, float yy)
+ClickType::Type VariableBase::clickType(float xx, float yy) const
 {
-  double fm=std::fmod(rotation(),360);
-  bool notflipped=(fm>-90 && fm<90) || fm>270 || fm<-270;
-  Rotate r(rotation()+(notflipped? 0: 180),0,0); // rotate into variable's frame of reference
-  RenderVariable rv(*this);
-  double z=zoomFactor();
+  const Rotate r(rotation()+(flipped(rotation())? 180: 0),0,0); // rotate into variable's frame of reference
+  const RenderVariable rv(*this);
+  const double z=zoomFactor();
   try
     {
-      double hpx=z*rv.handlePos();
+      const double hpx=z*rv.handlePos();
       double hpy=-z*rv.height();
       if (rv.height()<0.5*iHeight()) hpy=-z*0.5*iHeight(); 
-      double dx=xx-x(), dy=yy-y();         
+      const double dx=xx-x(), dy=yy-y();         
       if (type()!=constant && hypot(dx - r.x(hpx,hpy), dy-r.y(hpx,hpy)) < 5)
-        return ClickType::onSlider;
+        return ClickType::inItem;
     }
   catch (...) {}
   return Item::clickType(xx,yy);
@@ -144,20 +147,42 @@ float VariableBase::zoomFactor() const
 
 shared_ptr<VariableValue> VariableBase::vValue() const
 {
-  auto vv=minsky().variableValues.find(valueId());
+  auto vv=cminsky().variableValues.find(valueId());
   if (vv!=minsky().variableValues.end())
     return vv->second;
   return {};
 }
 
+vector<unsigned> VariableBase::dims() const
+{
+  try
+    {
+      if (auto v=vValue()) return v->hypercube().dims();
+    }
+  catch (...) {} // ignore any exceptions caused by evaluating RHS.
+  return {};
+}
+    
+vector<string> VariableBase::dimLabels() const
+{
+  if (auto v=vValue()) return v->hypercube().dimLabels();
+  return {};
+}    
+
+
 string VariableBase::valueId() const 
 {
-  return VariableValue::valueId(group.lock(), m_name);
+  return minsky::valueId(group.lock(), m_name);
 }
 
 std::string VariableBase::valueIdInCurrentScope(const std::string& nm) const
 {
-  return VariableValue::valueId(group.lock(), nm);
+  return minsky::valueId(group.lock(), nm);
+}
+
+bool VariableBase::local() const
+{
+  return m_name[0]!=':' && group.lock()!=cminsky().canvas.model;
 }
 
 string VariableBase::name()  const
@@ -166,23 +191,54 @@ string VariableBase::name()  const
   // hide any leading ':' in upper level
   if (m_name[0]==':')
     {
-      auto g=group.lock();
-      if (!g || g==cminsky().model)
         return m_name.substr(1);
     }
   return utf_to_utf<char>(m_name);
+}
+
+namespace
+{
+  const char specialLatex[]="#$%&";
+  // find and quote certain LaTeX characters
+  string quoteLaTeX(const std::string& x)
+  {
+    string quotedName;
+    int next=0;
+    for (auto p=x.find_first_of(specialLatex); p!=string::npos;
+         p=x.find_first_of(specialLatex,p+1))
+      {
+        if (p==0||x[p-1]!='\\')
+          quotedName+=x.substr(next,p-next)+'\\'+x[p];
+        else
+          quotedName+=x.substr(next,p-next+1);
+        next=p+1;
+      }
+    return quotedName+x.substr(next);
+  }
 }
 
 string VariableBase::name(const std::string& name) 
 {
   // cowardly refuse to set a blank name
   if (name.empty() || name==":") return name;
+
+  // check if we need to quote certain characters that have meaning in LaTeX 
+  for (auto p=name.find_first_of(specialLatex); p!=string::npos;
+       p=name.find_first_of(specialLatex,p+1))
+    if (p==0||name[p-1]!='\\')
+      return this->name(quoteLaTeX(name));
+  
   // Ensure value of variable is preserved after rename. For ticket 1106.	
   auto tmpVV=vValue();
-  // ensure integral variables are not global when wired to an integral operation
-  m_name=(type()==integral && name[0]==':' &&inputWired())? name.substr(1): name;
-  ensureValueExists(tmpVV.get(),name);
+  m_name=name;
+  m_canonicalName=minsky::canonicalName(name);
+  ensureValueExists(tmpVV.get());
+  assert(!vValue() || vValue()->valueId()==valueId());
+  cachedNameRender.reset();
   bb.update(*this); // adjust bounding box for new name - see ticket #704
+  if (auto controllingItem=controller.lock())
+    // integrals in particular may have had their size changed with intVar changing name
+    controllingItem->updateBoundingBox();
   return this->name();
 }
 
@@ -190,20 +246,48 @@ bool VariableBase::ioVar() const
 {return dynamic_cast<Group*>(controller.lock().get());}
 
 
-void VariableBase::ensureValueExists(VariableValue* vv, const std::string& nm) const
+void VariableBase::ensureValueExists(VariableValue* vv) const
 {	
   string valueId=this->valueId();
   // disallow blank names
-  if (valueId.length()>1 && valueId.substr(valueId.length()-2)!=":_" && 
-      minsky().variableValues.count(valueId)==0)
+  if (valueId.length()>1 && valueId.substr(valueId.length()-2)!=":_")
     {
-      assert(VariableValue::isValueId(valueId));
-	  // Ensure value of variable is preserved after rename. For ticket 1106.	      
+      // Check if a variable with this valueId already exists
+      auto existingVar = minsky().variableValues.find(valueId);
+      if (existingVar != minsky().variableValues.end())
+        {
+          // Variable exists - check if types match. For ticket 1473.
+          // Allow if vv points to the existing variable (same variable being updated)
+          if (existingVar->second.get() == vv || existingVar->second->type() == type())
+            return; // already existing, and type matches, so nothing further to do
+
+          // check if there are any variables associated with this variableValue
+          auto v=cminsky().model->findAny
+            (&GroupItems::items, [&valueId,type=type()](const ItemPtr& i){
+              if (auto var=i->variableCast())
+                return var->valueId()==valueId && var->type()!=type;
+              return false;});
+          if (v)  
+            throw error("Variable '%s' already exists with type %s, cannot create with type %s",
+                        m_name.c_str(), 
+                        VariableType::typeName(existingVar->second->type()).c_str(),
+                        VariableType::typeName(type()).c_str());
+          // no variables associated with this variableValue - remove and recreate
+          minsky().variableValues.erase(existingVar);
+        }
+      // Variable doesn't exist - create it
+      assert(isValueId(valueId));
+      // Ensure value of variable is preserved after rename. 	      
       if (vv==nullptr)
-        minsky().variableValues.emplace(valueId,VariableValuePtr(type(), name(),"",group.lock()));
-      // Ensure variable names are updated correctly everywhere they appear. For tickets 1109/1138.  
+        minsky().variableValues.emplace(valueId,VariableValuePtr(type(), m_name)).
+          first->second->m_scope=minsky::scope(group.lock(),m_name);
+      // Ensure variable names are updated correctly everywhere they appear. 
       else
-        minsky().variableValues.emplace(valueId,VariableValuePtr(type(),*vv));
+        {
+          auto iter=minsky().variableValues.emplace(valueId,VariableValuePtr(type(),*vv)).first->second;
+          iter->name=m_name;
+          iter->m_scope=minsky::scope(group.lock(),m_name);
+        }
     }
 }
 
@@ -220,27 +304,32 @@ string VariableBase::init() const
           i=dynamic_cast<IntOp*>(&(m_ports[1]->wires()[0]->from()->item()));
         if (i && i->portsSize()>2 && !i->ports(2).lock()->wires().empty())
           if (auto lhsVar=i->ports(2).lock()->wires()[0]->from()->item().variableCast())
-          // Since integral takes initial value from second port, the intVar should have the same intial value.
-            if (vValue()->init!=lhsVar->vValue()->init) vValue()->init=lhsVar->vValue()->init;
+            if (auto vv=vValue())
+              if (auto lhsVv=lhsVar->vValue())
+                // Since integral takes initial value from second port, the intVar should have the same intial value.
+                if (vv->init()!=lhsVv->init()) vv->init(lhsVv->init());
       }
-    return value->second->init;
+    return value->second->init();
   }
   return "0";
 }
 
 string VariableBase::init(const string& x)
 {
-  ensureValueExists(nullptr,""); 
-  if (VariableValue::isValueId(valueId()))
+  ensureValueExists(nullptr); 
+  if (isValueId(valueId()))
     {
       VariableValue& val=*minsky().variableValues[valueId()];
-      val.init=x;     
+      val.init(x);     
       // for constant types, we may as well set the current value. See ticket #433. Also ignore errors (for now), as they will reappear at reset time.
       try
         {
           if (type()==constant || type()==parameter ||
-              (type()==flow && !cminsky().definingVar(valueId()))) 
-            val.reset(minsky().variableValues);
+              (type()==flow && !cminsky().definingVar(valueId())))
+            {
+              minsky().variableValues.resetValue(val);
+              cachedNameRender.reset(); // for constants
+            }
         }
       catch (...)
         {}
@@ -251,16 +340,51 @@ string VariableBase::init(const string& x)
 
 double VariableBase::value() const
 {
-  if (VariableValue::isValueId(valueId()))
-    return minsky::cminsky().variableValues[valueId()]->value();
-  return 0;
+  auto& vvs=minsky::cminsky().variableValues;
+  auto v=vvs.find(valueId());
+  if (v==vvs.end() || !v->second) return 0;
+  return v->second->value();
 }
 
 double VariableBase::value(const double& x)
 {
-  if (!m_name.empty() && VariableValue::isValueId(valueId()))
-    (*minsky().variableValues[valueId()])[0]=x;
+  if (!m_name.empty() && isValueId(valueId()))
+    {
+      (*minsky().variableValues[valueId()])[0]=x;
+      if (type()==constant)
+        cachedNameRender.reset();
+    }
   return x;
+}
+
+static string emptyString;
+
+const std::string& VariableBase::detailedText() const
+{
+  if (auto vv=vValue())
+    return vv->detailedText;
+  return emptyString  ;
+}
+
+const std::string& VariableBase::detailedText(const std::string& x)
+{
+    if (auto vv=vValue())
+    return vv->detailedText=x;
+  return emptyString  ;
+}
+
+const std::string& VariableBase::tooltip() const
+{
+  if (auto vv=vValue())
+    return vv->tooltip;
+  return emptyString  ;
+}
+
+const std::string& VariableBase::tooltip(const std::string& x)
+{
+    if (auto vv=vValue())
+    return vv->tooltip=x;
+  return emptyString  ;
 }
 
 int VariableBase::stockVarsPassed=0;
@@ -286,8 +410,8 @@ Units VariableBase::units(bool check) const
       if (vv->unitsCached) return vv->units;
 
       
-      IncrDecrCounter ucIdc(unitsCtr);
-      IncrDecrCounter vpIdc(varsPassed);
+      const IncrDecrCounter ucIdc(unitsCtr);
+      const IncrDecrCounter vpIdc(varsPassed);
       // use a unique ptr here to only increment counter inside a stockVar
       unique_ptr<IncrDecrCounter> svp;
 
@@ -302,6 +426,8 @@ Units VariableBase::units(bool check) const
                 units=i->units(check);
               else if (auto g=dynamic_cast<GodleyIcon*>(controller.lock().get()))
                 units=g->stockVarUnits(name(),check);
+              else // I/O variable
+                units=vv->units;
               if (check && units.str()!=vv->units.str())
                 {
                   if (auto i=controller.lock())
@@ -310,11 +436,11 @@ Units VariableBase::units(bool check) const
 
               if (check && controller.lock())
                 {
-                  FlowCoef fc(init());
+                  const FlowCoef fc(init());
                   if (!fc.name.empty())
                     {
                       // extract the valueid corresponding to the initialisation variable
-                      auto vid=VariableValue::valueId(vv->m_scope.lock(), fc.name);
+                      auto vid=minsky::valueId(vv->m_scope.lock(), fc.name);
                       // find the first variable matching vid, and check that the units match
                       if (auto initVar=cminsky().model->findAny
                           (&GroupItems::items, [&vid](const ItemPtr& i){
@@ -330,7 +456,10 @@ Units VariableBase::units(bool check) const
       else
         // updates units in the process
         if (m_ports.size()>1 && !m_ports[1]->wires().empty())
-          vv->units=m_ports[1]->wires()[0]->from()->item().units(check);
+          {
+            assert(m_ports[1]->wires()[0]->from());
+            vv->units=m_ports[1]->wires()[0]->from()->item().units(check);
+          }
         else if (auto v=cminsky().definingVar(valueId()))
           vv->units=v->units(check);
 
@@ -343,35 +472,40 @@ Units VariableBase::units(bool check) const
 
 void VariableBase::setUnits(const string& x) const
 {
-  if (VariableValue::isValueId(valueId()))
+  if (isValueId(valueId()))
     minsky().variableValues[valueId()]->units=Units(x);
 }
 
 
 
-void VariableBase::exportAsCSV(const std::string& filename) const
+void VariableBase::exportAsCSV(const std::string& filename, bool tabular) const
 {
   auto value=minsky().variableValues.find(valueId());
   if (value!=minsky().variableValues.end())
-    value->second->exportAsCSV(filename, name());
+    value->second->exportAsCSV(filename, name(), tabular);
 }
 
-void VariableBase::importFromCSV(std::string filename, const DataSpec& spec) const
+void VariableBase::importFromCSV(const vector<string>& filenames, const DataSpecSchema& spec) const
 {
   if (auto v=vValue()) {
-    if (filename.find("://")!=std::string::npos)
-      filename = v->csvDialog.loadWebFile(filename);
-    std::ifstream is(filename);
-    loadValueFromCSVFile(*v, is, spec);
-    minsky().populateMissingDimensionsFromVariable(*v);
+    v->spec=spec;
+    v->importFromCSV(filenames);
   }
 }
 
+// TODO - save multifile selections?
+void VariableBase::reloadCSV()
+{
+  if (auto v=vValue()) 
+    if (!v->url.empty())
+      loadValueFromCSVFile(*v, {v->url}, v->spec);
+}
 
 void VariableBase::insertControlled(Selection& selection)
 {
   selection.ensureItemInserted(controller.lock());
 }
+
 
 namespace minsky
 {
@@ -387,7 +521,7 @@ namespace minsky
 
 void VariablePtr::retype(VariableBase::Type type) 
 {
-  VariablePtr tmp(*this);
+  const VariablePtr tmp(*this);
   if (tmp && tmp->type()!=type)
     {
       reset(VariableBase::create(type));
@@ -400,7 +534,7 @@ void VariablePtr::retype(VariableBase::Type type)
             else
               w->moveToPorts(get()->ports(i).lock(), w->to());
           }
-      get()->ensureValueExists(nullptr,"");
+      get()->ensureValueExists(nullptr);
     }
 }
 
@@ -409,78 +543,25 @@ bool VariableBase::visible() const
   auto g=group.lock();
   //toplevel i/o items always visible
   if ((!g || !g->group.lock()) && g==controller.lock()) return true;
-  if (!Item::visible()) return false;
-  // ensure pars, constants and flows with invisible out wires are made invisible. for ticket 1275  
-  if ((type()==constant || type()==parameter) && !m_ports[0]->wires().empty())
-  {
-    return !std::any_of(m_ports[0]->wires().begin(),m_ports[0]->wires().end(), [](Wire* w)
-                       {return w->attachedToDefiningVar() && !w->visible();});
-  }  
-  // ensure flow vars with out wires remain visible. for ticket 1275
-  if (attachedToDefiningVar())
-    {
-      bool visibleOutWires=false;
-      for (auto w: m_ports[0]->wires())
-        visibleOutWires |= w->visible();
-      if (visibleOutWires)
-        return true;
-    }
-  if (auto i=dynamic_cast<IntOp*>(controller.lock().get()))
-     if (i->attachedToDefiningVar()) return true;
-  return !controller.lock();
+  if (controller.lock()) return false;
+  return Item::visible();
 }
 
-
-void VariableBase::sliderSet(double x)
+bool VariableBase::sliderVisible() const
 {
-  if (x<sliderMin) x=sliderMin;
-  if (x>sliderMax) x=sliderMax;
-  sliderStep=maxSliderSteps();    
-  init(to_string(x));
-  value(x);
+  auto vv=vValue();
+  return enableSlider() &&
+    ((!vv && type()==parameter) ||
+     (vv && vv->size()==1 &&
+      (type()==parameter ||
+       // !inputWired() short circuits the more expensive definingVar operation.
+       (type()==flow && !inputWired() && !cminsky().definingVar(valueId())))));
 }
 
-
-void VariableBase::initSliderBounds() const
-{
-  if (!sliderBoundsSet)
-    {
-      if (value()==0)
-        {
-          sliderMin=-1;
-          sliderMax=1;
-          sliderStep=0.1;
-        }
-      else
-        {
-          sliderMin=-value()*10;
-          sliderMax=value()*10;
-          sliderStep=abs(0.1*value());           
-        }
-      sliderStepRel=false;
-      sliderBoundsSet=true;
-    }
-    sliderStep=maxSliderSteps();      
-}
-
-void VariableBase::adjustSliderBounds() const
+void VariableBase::adjustSliderBounds() const 
 {
   if (auto vv=vValue())
-  // For feature 47
-    if (vv->size()==1 && !isnan(vv->value()))  // make sure sliderBoundsSet is defined. for tickets 1258/1263
-      {
-        if (sliderMax<vv->value()) sliderMax=vv->value();
-        if (sliderMin>vv->value()) sliderMin=vv->value();
-        sliderStep=maxSliderSteps(); 
-        sliderBoundsSet=true;	                    
-      }
-}
-
-double VariableBase::maxSliderSteps() const
-{
-    // ensure there are at most 10000 steps between sliderMin and Max. for ticket 1255. 	
-	if ((sliderMax-sliderMin)/sliderStep > 1.0e04) return (sliderMax-sliderMin)/1.0e04;    
-	return sliderStep;
+    vv->adjustSliderBounds();
 }
 
 bool VariableBase::onKeyPress(int keySym, const std::string&,int)
@@ -488,11 +569,13 @@ bool VariableBase::onKeyPress(int keySym, const std::string&,int)
   switch (keySym)
     {
     case 0xff52: case 0xff53: //Right, Up
-        sliderSet(value()+(sliderStepRel? value(): 1)*sliderStep);
-        return true;
+      if (auto vv=vValue()) vv->incrSlider(1);
+      if (!minsky().running) minsky().requestReset();
+      return true;
     case 0xff51: case 0xff54: //Left, Down
-        sliderSet(value()-(sliderStepRel? value(): 1)*sliderStep);
-        return true;
+      if (auto vv=vValue()) vv->incrSlider(-1);
+      if (!minsky().running) minsky().requestReset();
+      return true;
     default:
       return false;
     }
@@ -508,151 +591,305 @@ std::string VariableBase::definition() const
   if (type()!=VariableType::parameter)
     {
       if (varDAG && varDAG->rhs && varDAG->type!=VariableType::constant && varDAG->type!=VariableType::integral)
-        o << varDAG->rhs->matlab();
+        o << varDAG->rhs->latex();
       else return system.getDefFromIntVar(*this).str();
     }
           
   return o.str();	  
 }
 
-void VariableBase::draw(cairo_t *cairo) const
-{	
-    double angle=rotation() * M_PI / 180.0;
-    double fm=std::fmod(rotation(),360);
-    float z=zoomFactor();
+bool VariableBase::miniPlotEnabled(bool enabled)
+{
+  if (enabled)
+    {
+      miniPlot=make_shared<ecolab::Plot>();
+      miniPlot->plotType=ecolab::Plot::PlotType::bar;
+    }
+  else
+    miniPlot=nullptr;
+  return enabled;
+}
 
-    RenderVariable rv(*this,cairo);
-    // if rotation is in 1st or 3rd quadrant, rotate as
-    // normal, otherwise flip the text so it reads L->R
-    bool notflipped=(fm>-90 && fm<90) || fm>270 || fm<-270;
-    Rotate r(rotation() + (notflipped? 0: 180),0,0);
-    rv.angle=angle+(notflipped? 0: M_PI);
+void VariableBase::resetMiniPlot()
+{
+  if (miniPlotEnabled())
+    miniPlot->clear();
+}
 
-    // parameters of icon in userspace (unscaled) coordinates
-    float w, h, hoffs, scaleFactor;
-    w=rv.width()*z; 
-    h=rv.height()*z;
-    scaleFactor=max(1.0f,min(0.5f*iWidth()*z/w,0.5f*iHeight()*z/h));
-    if (rv.width()<0.5*iWidth()) w=0.5*iWidth()*z;
-    if (rv.height()<0.5*iHeight()) h=0.5*iHeight()*z;
-    rv.setFontSize(12*scaleFactor*z);
-    hoffs=rv.top()*z;
+bool VariableBase::onMouseMotion(float x, float y) 
+{
+  if (auto vv=vValue())
+    {
+      const RenderVariable rv(*this);
+      const double rw=fabs(zoomFactor()*(rv.width()<iWidth()? 0.5*iWidth() : rv.width())*cos(rotation()*M_PI/180));
+      const double sliderPos=(x-this->x())* (vv->sliderMax-vv->sliderMin)/rw+0.5*(vv->sliderMin+vv->sliderMax);
+      const double sliderHatch=sliderPos-fmod(sliderPos,vv->sliderStep);   // matches slider's hatch marks to sliderStep value. for ticket 1258
+      vv->sliderSet(sliderHatch);
+    }
+  // push History to prevent an unnecessary reset when
+  // adjusting the slider whilst paused. See ticket #812
+  minsky().pushHistory();
+  if (minsky().reset_flag())
+    minsky().requestReset();
+  minsky().evalEquations();
+  return true;
+}
+
+double VariableBase::sliderMin() const
+{
+  if (auto vv=vValue())
+    return vv->sliderMin;
+  return 0;
+}
+
+
+double VariableBase::sliderMin(double x) const
+{
+  if (auto vv=vValue())
+    return vv->sliderMin=x;
+  return 0;
+}
+
+double VariableBase::sliderMax() const
+{
+  if (auto vv=vValue())
+    return vv->sliderMax;
+  return 0;
+}
+
+double VariableBase::sliderMax(double x) const
+{
+  if (auto vv=vValue())
+    return vv->sliderMax=x;
+  return 0;
+}
+
+double VariableBase::sliderStep() const
+{
+  if (auto vv=vValue())
+    return vv->sliderStep;
+  return 0;
+}
+
+double VariableBase::sliderStep(double x) const
+{
+  if (auto vv=vValue())
+    return vv->sliderStep=x;
+  return 0;
+}
+
+bool VariableBase::sliderStepRel() const
+{
+  if (auto vv=vValue())
+    return vv->sliderStepRel;
+  return false;
+}
+
+bool VariableBase::sliderStepRel(bool x) const
+ {
+  if (auto vv=vValue())
+    return vv->sliderStepRel=x;
+  return false;
+}
+ 
+bool VariableBase::enableSlider() const
+{
+  if (auto vv=vValue())
+    return vv->enableSlider;
+  return false;
+}
+ 
+bool VariableBase::enableSlider(bool x) const
+{
+  if (auto vv=vValue())
+    return vv->enableSlider=x;
+  return false;
+}
+
+void VariableBase::draw(const ICairoShim& cairoShim) const
+{
+  auto [angle,flipped]=rotationAsRadians();
+  const float z=zoomFactor();
+
+  // grab a thread local copy of the renderer caches, as MacOSX does
+  // rendering on a different thread, and this avoids a race condition
+  // when the cache is invalidated
+  auto l_cachedNameRender=cachedNameRender;
+  if (!l_cachedNameRender || cairoShim.context()!=l_cachedNameRender->context())
+    l_cachedNameRender=cachedNameRender=std::make_shared<RenderVariable>(*this,cairoShim);
+    
+  // if rotation is in 1st or 3rd quadrant, rotate as
+  // normal, otherwise flip the text so it reads L->R
+  const Rotate r(rotation() + (flipped? 180:0),0,0);
+
+  // parameters of icon in userspace (unscaled) coordinates
+  const double w=std::max(l_cachedNameRender->width(), 0.5f*iWidth()); 
+  const double h=std::max(l_cachedNameRender->height(), 0.5f*iHeight());
+  const double hoffs=l_cachedNameRender->top();
   
-
-    cairo_move_to(cairo,r.x(-w+1,-h-hoffs+2), r.y(-w+1,-h-hoffs+2)/*h-2*/);
-    rv.show();
+  auto cairo=dynamic_cast<const CairoShimCairo&>(cairoShim)._internalGetCairoContext();
+ 
+  unique_ptr<cairo::Path> clipPath;
+  {
+    cairoShim.save();
+    cairoShim.scale(z,z);
+    cairoShim.moveTo(r.x(-w+1,-h-hoffs+2), r.y(-w+1,-h-hoffs+2));
+    {
+      cairoShim.save();
+      if (local())
+        cairoShim.setSourceRGB(0,0,1);
+      cairoShim.rotate(angle+(flipped? M_PI:0));
+      l_cachedNameRender->show();
+      cairoShim.restore();
+    }
 
     auto vv=vValue();
-  
-    // For feature 47
-    if (type()!=constant && !ioVar() && vv && vv->size()==1)
+    if (miniPlot && vv && vv->size()==1)
       try
         {
-          auto val=engExp();    
-          
-          Pango pangoVal(cairo);
-          if (!isnan(value())) {
-            pangoVal.setFontSize(6*scaleFactor*z);
-            if (sliderBoundsSet && vv->sliderVisible)
-              pangoVal.setMarkup
-                (mantissa(val,
-                          int(1+
-                              (sliderStepRel?
-                               -log10(maxSliderSteps()):
-                               log10(value()/maxSliderSteps())
-                               ))));
-            else
-              pangoVal.setMarkup(mantissa(val));
-          }
-          else if (isinf(value())) { // Display non-zero divide by zero as infinity. For ticket 1155
-            pangoVal.setFontSize(8*scaleFactor*z);
-            if (signbit(value())) pangoVal.setMarkup("-∞");
-            else pangoVal.setMarkup("∞");
-          }
-          else {  // Display all other NaN cases as ???. For ticket 1155
-            pangoVal.setFontSize(6*scaleFactor*z);
-            pangoVal.setMarkup("???");
-          }
-          pangoVal.angle=angle+(notflipped? 0: M_PI);
-
-          cairo_move_to(cairo,r.x(w-pangoVal.width()-2,-h-hoffs+2),
-                        r.y(w-pangoVal.width()-2,-h-hoffs+2));
-          pangoVal.show();
-          if (val.engExp!=0 && (!isnan(value()))) // Avoid large exponential number in variable value display. For ticket 1155
+          if (cachedTime!=cminsky().t)
             {
-              pangoVal.setMarkup(expMultiplier(val.engExp));
-              cairo_move_to(cairo,r.x(w-pangoVal.width()-2,0),r.y(w-pangoVal.width()-2,0));
-              pangoVal.show();
+              cachedTime=cminsky().t;
+              miniPlot->addPt(0,cachedTime,vv->value());
+              miniPlot->setMinMax();
             }
+          cairoShim.save();
+          cairoShim.translate(-w,-h);
+          miniPlot->draw(cairo,2*w,2*h);
+          cairoShim.restore();
         }
       catch (...) {} // ignore errors in obtaining values
 
-    unique_ptr<cairo::Path> clipPath;
+    // For feature 47
+    try
+      {
+        if (type()!=constant && !ioVar() && vv && vv->size()==1 && vv->idxInRange())
+          {
+            auto l_cachedMantissa=cachedMantissa;
+            auto l_cachedExponent=cachedExponent;
+            auto val=engExp();    
+            if (!l_cachedMantissa || l_cachedMantissa->context()!=cairoShim.context() ||
+               value()!=cachedValue || cachedMaxSliderSteps!=vv->maxSliderSteps())
+              {
+         
+                cachedValue=value();
+                TextProperties mantissaText, exponentText;
+                if (isfinite(value())) {
+                  if (sliderVisible())
+                    mantissaText.markup=
+                      mantissa(val,
+                                int(1+
+                                    (vv->sliderStepRel?
+                                     -log10(vv->maxSliderSteps()):
+                                     log10(vv->value()/vv->maxSliderSteps())
+                                     )));
+                  else
+                    mantissaText.markup=mantissa(val);
+                }
+                else if (isinf(value())) { // Display non-zero divide by zero as infinity. For ticket 1155
+                  if (signbit(value())) mantissaText.markup="-∞";
+                  else mantissaText.markup="∞";
+                }
+                else // Display all other NaN cases as ???. For ticket 1155
+                  mantissaText.markup="???";
+                exponentText=expMultiplier(val.engExp);
+                mantissaText.fontSize=6;
+                exponentText.fontSize=6;
+                l_cachedMantissa=cachedMantissa=shared_ptr(cairoShim.cachedRender(mantissaText));
+                l_cachedExponent=cachedExponent=shared_ptr(cairoShim.cachedRender(exponentText));
+              }
+
+            auto mantissaBB=l_cachedMantissa->extents();
+            cairoShim.moveTo(r.x(w-mantissaBB.width-2,-h-hoffs+2),
+                             r.y(w-mantissaBB.width-2,-h-hoffs+2));
+            {
+              CairoShimSave cs(cairoShim);
+              cairoShim.rotate(angle+(flipped? M_PI:0));
+              l_cachedMantissa->show();
+            }
+
+            if (val.engExp!=0 && !isnan(value())) // Avoid large exponential number in variable value display. For ticket 1155
+              {
+                auto exponentBB=l_cachedExponent->extents();
+                cairoShim.moveTo(r.x(w-exponentBB.width-2,0),r.y(w-exponentBB.width-2,0));
+                CairoShimSave cs(cairoShim);
+                cairoShim.rotate(angle+(flipped? M_PI:0));
+                l_cachedExponent->show();
+              }
+          }
+      }
+    catch (...) {} // ignore errors in obtaining values
+
     {
-      cairo::CairoSave cs(cairo);
-      cairo_rotate(cairo, angle);
+      cairoShim.save();
+      cairoShim.rotate(angle);
       // constants and parameters should be rendered in blue, all others in red
       switch (type())
         {
         case constant: case parameter:
-          cairo_set_source_rgb(cairo,0,0,1);
+          cairoShim.setSourceRGB(0,0,1);
           break;
         default:
-          cairo_set_source_rgb(cairo,1,0,0);
+          cairoShim.setSourceRGB(1,0,0);
           break;
         }
-      cairo_move_to(cairo,-w,-h);
+      cairoShim.moveTo(-w,-h);
       if (lhs())
-        cairo_line_to(cairo,-w+2*z,0);
-      cairo_line_to(cairo,-w,h);
-      cairo_line_to(cairo,w,h);
-      cairo_line_to(cairo,w+2*z,0);
-      cairo_line_to(cairo,w,-h);
-      cairo_close_path(cairo);
+        cairoShim.lineTo(-w+2,0);
+      cairoShim.lineTo(-w,h);
+      cairoShim.lineTo(w,h);
+      cairoShim.lineTo(w+2,0);
+      cairoShim.lineTo(w,-h);
+      cairoShim.closePath();
       clipPath.reset(new cairo::Path(cairo));
-      cairo_stroke(cairo);
-      if (vv && vv->sliderVisible && vv->size()==1)
+      cairoShim.stroke();
+      if (sliderVisible())
         {
           // draw slider
-          CairoSave cs(cairo);
-          cairo_set_source_rgb(cairo,0,0,0);
+          cairoShim.save();
+          cairoShim.setSourceRGB(0,0,0);
           try
             {
-              cairo_arc(cairo,(notflipped?1:-1)*z*rv.handlePos(), (notflipped? -h: h), sliderHandleRadius, 0, 2*M_PI);
+              cairoShim.arc((flipped?-1.0:1.0)*l_cachedNameRender->handlePos(), (flipped? h: -h), sliderHandleRadius, 0, 2*M_PI);
             }
           catch (const error&) {} // handlePos() may throw.
-          cairo_fill(cairo);
+          cairoShim.fill();
+          cairoShim.restore();
         }
+      cairoShim.restore();
     }// undo rotation
 
-    double x0=w, y0=0, x1=-w+2, y1=0;
-    double sa=sin(angle), ca=cos(angle);
+    const double x0=z*w, y0=0, x1=-z*w+2, y1=0;
+    const double sa=sin(angle), ca=cos(angle);
     if (!m_ports.empty())
       m_ports[0]->moveTo(x()+(x0*ca-y0*sa), 
-                       y()+(y0*ca+x0*sa));
+                         y()+(y0*ca+x0*sa));
     if (m_ports.size()>1)
       m_ports[1]->moveTo(x()+(x1*ca-y1*sa), 
-                       y()+(y1*ca+x1*sa));
+                         y()+(y1*ca+x1*sa));
+    cairoShim.restore();
+  }
+    
+  auto g=group.lock();
+  if (mouseFocus || (ioVar() && g && g->mouseFocus))
+    {
+      cairoShim.save();
+      drawPorts(cairoShim);
+      displayTooltip(cairoShim,tooltip());
+      if (onResizeHandles) drawResizeHandles(cairoShim);
+      cairoShim.restore();
+    }  
 
-    auto g=group.lock();
-    if (mouseFocus || (ioVar() && g && g->mouseFocus))
-      {
-        cairo::CairoSave cs(cairo);
-        drawPorts(cairo);
-        displayTooltip(cairo,tooltip);
-        if (onResizeHandles) drawResizeHandles(cairo);
-      }  
-
-    cairo_new_path(cairo);
-    clipPath->appendToCurrent(cairo);
-    // Rescale size of variable attached to intop. For ticket 94
-    cairo_clip(cairo);
-    if (selected) drawSelected(cairo);
+  cairoShim.newPath();
+  clipPath->appendToCurrent(cairo);
+  // Rescale size of variable attached to intop. For ticket 94
+  cairoShim.clip();
+  if (selected) drawSelected(cairoShim);
 }
 
 void VariableBase::resize(const LassoBox& b)
 {
-  float invZ=1/zoomFactor();
+  const float invZ=1/zoomFactor();
   moveTo(0.5*(b.x0+b.x1), 0.5*(b.y0+b.y1));  
   iWidth(abs(b.x1-b.x0)*invZ);
   iHeight(abs(b.y1-b.y0)*invZ);   
@@ -664,3 +901,13 @@ void VariablePtr::makeConsistentWithValue()
 }
 
 int VarConstant::nextId=0;
+
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::VariablePtr);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::VariableBase);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Variable<minsky::VariableType::undefined>);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Variable<minsky::VariableType::constant>);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Variable<minsky::VariableType::parameter>);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Variable<minsky::VariableType::flow>);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Variable<minsky::VariableType::integral>);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Variable<minsky::VariableType::stock>);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Variable<minsky::VariableType::tempFlow>);

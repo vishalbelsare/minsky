@@ -23,9 +23,10 @@
 
 #ifndef GODLEYTABLEWINDOW_H
 #define GODLEYTABLEWINDOW_H
-#include "godleyIcon.h"
 #include "assetClass.h"
-#include <cairoSurfaceImage.h>
+#include "godleyTable.h"
+#include "ICairoShim.h"
+#include "renderNativeWindow.h"
 #include <memory>
 #include <vector>
 
@@ -37,6 +38,8 @@ namespace minsky
     enum Pos {first, second, middle, last, firstAndLast};
   };
   
+  class GodleyIcon;
+
   /// supports +/-/←/→/↓/↑ widget
   template <minsky::ButtonWidgetEnums::RowCol rowCol>
   class ButtonWidget: public ButtonWidgetEnums
@@ -52,6 +55,7 @@ namespace minsky
     unsigned idx=0; ///< row or column this widget is located in
     
     void draw(cairo_t*);
+    void draw(const ICairoShim&);
     /// draw button \a idx, with label \a label and colour \a r, \a b, \a g
     void drawButton(cairo_t*, const std::string& label,
                     double r, double g, double b, int idx);
@@ -68,32 +72,45 @@ namespace minsky
       godleyIcon(godleyIcon), idx(idx) {}
   };
 
-  class GodleyTableEditor: public ButtonWidgetEnums
+  class GodleyTableEditor;
+
+  // This class is intended to be owned by a Godley Icon
+  class GodleyTableEditor: public ButtonWidgetEnums, public GodleyAssetClass
   {
     
     CLASSDESC_ACCESS(GodleyTableEditor);
-  public:
+    GodleyIcon& m_godleyIcon; ///< Godley icon that owns this
+    bool button1=false; ///< mouse button pressed
+    void m_enableButtons() {
+      drawButtons=true; leftTableOffset=4*ButtonWidget<col>::buttonSpacing;
+      topTableOffset=30;adjustWidgets();
+    }
+   public:
     static constexpr double columnButtonsOffset=12;
     /// offset of the table within the window
     double leftTableOffset=4*ButtonWidget<col>::buttonSpacing;
     double topTableOffset=30;
-    static constexpr double pulldownHot=12; ///< space for ▼ in stackVar cells
+    static constexpr double pulldownHot=16; ///< space for ▼ in stackVar cells
     /// minimum column width (for eg empty columns)
     static constexpr double minColumnWidth=4*ButtonWidget<col>::buttonSpacing;
 
+    // note explicit getter/setter here rather than public member to
+    // avoid an infinite recursion when running RESTProcess on this
+    // object
+    GodleyIcon& godleyIcon() {return m_godleyIcon;}
+    const GodleyIcon& godleyIcon() const {return m_godleyIcon;}
+    
     bool drawButtons=true; ///< whether to draw row/column buttons
-    void disableButtons() {drawButtons=false; leftTableOffset=0; topTableOffset=20; }
-    void enableButtons() {drawButtons=true; leftTableOffset=4*ButtonWidget<col>::buttonSpacing; topTableOffset=30;}
+    void disableButtons() {drawButtons=false; leftTableOffset=0; topTableOffset=20; requestRedrawCanvas();}
+    void enableButtons() {m_enableButtons();requestRedrawCanvas();}
 
-    std::shared_ptr<GodleyIcon> godleyIcon;
     /// starting row/col number of the scrolling region
     unsigned scrollRowStart=1, scrollColStart=1;
     /// which cell is active, none initially
     int selectedRow=-1, selectedCol=-1;
     /// src cell in the event of a move
     int srcRow=-1, srcCol=-1;
-    bool selectedCellInTable() const
-    {return godleyIcon->table.cellInTable(selectedRow, selectedCol);}
+    bool selectedCellInTable() const;
     int hoverRow=-1, hoverCol=-1;
     /// computed positions of the table columns
     std::vector<double> colLeftMargin;
@@ -102,17 +119,16 @@ namespace minsky
     /// location of insertion pointer in selected cell, as well as
     /// other end of selection (if mouse-swiped)
     unsigned insertIdx=0, selectIdx=0;
-    bool displayValues=false;
-    GodleyTable::DisplayStyle displayStyle=GodleyTable::sign;
     double zoomFactor=1; ///< zoom the display
 
-    GodleyTableEditor(const std::shared_ptr<GodleyIcon>& g): godleyIcon(g)
-    {enableButtons(); adjustWidgets();}
+    GodleyTableEditor(GodleyIcon& g): m_godleyIcon(g)
+    {m_enableButtons(); adjustWidgets();}
 
     void draw(cairo_t* cairo);
+    void draw(const ICairoShim& cairoShim);
 
     double width() const {return colLeftMargin.empty()? 0: colLeftMargin.back();}
-    double height() const {return godleyIcon? godleyIcon->table.rows()*rowHeight: 0;}
+    double height() const;
     
     /// event handling 
     void mouseDown(double x, double y);
@@ -129,18 +145,28 @@ namespace minsky
     
     /// add/delete rows/columns at x,y
     void addStockVar(double x);
-    void importStockVar(const string& name, double x);
+    void addStockVarByCol(int c);
+    void importStockVar(const std::string& name, double x);
+    void importStockVarByCol(const std::string& name, int c);
     void deleteStockVar(double x);
+    void deleteStockVarByCol(int c);
     void addFlow(double y);
+    void addFlowByRow(int r);
     void deleteFlow(double y);
+    void deleteFlowByRow(int r);
     
     int colXZoomed(double x) const {return colX(x/zoomFactor);}
     int rowYZoomed(double y) const {return rowY(y/zoomFactor);}
+
+    /// column at \a x in unzoomed coordinates
+    int colX(double x) const;
+    /// row at \a y in unzoomed coordinates
+    int rowY(double y) const;
     
     // warn user when a stock variable column is going to be moved to a different asset class on pressing a column button widget. For ticket 1072.
-    string moveAssetClass(double x, double y);
+    std::string moveAssetClass(double x, double y);
     // warn user when a stock variable column is going to be swapped with a column from a different asset class on mouse click and drag. For ticket 1072.
-    string swapAssetClass(double x, double y);
+    std::string swapAssetClass(double x, double y);
 
     void highlightColumn(cairo_t* cairo,unsigned col);
     void highlightRow(cairo_t* cairo,unsigned row);
@@ -176,14 +202,13 @@ namespace minsky
     /// @}
     
     ClickType clickType(double x, double y) const;
+    /// return list of matching table columns for column at \a x
+    std::set<string> matchingTableColumns(double x);
+    std::set<string> matchingTableColumnsByCol(int c);
    
   protected:
     std::vector<ButtonWidget<row>> rowWidgets;
     std::vector<ButtonWidget<col>> colWidgets;
-    /// column at \a x in unzoomed coordinates
-    int colX(double x) const;
-    /// row at \a y in unzoomed coordinates
-    int rowY(double y) const;
     int motionRow=-1, motionCol=-1; ///< current cell under mouse motion
     // Perform deep comparison of Godley tables in history to avoid spurious noAssetClass columns from arising during undo. For ticket 1118.
     std::deque<GodleyTable> history;
@@ -191,16 +216,34 @@ namespace minsky
     /// handle delete or backspace. Cell assumed selected
     void handleBackspace();    
     void handleDelete();
+    virtual void requestRedrawCanvas() {} // request redraw of canvas if a canvas
   };
 
-  class GodleyTableWindow: public ecolab::CairoSurface, public GodleyTableEditor
+  class GodleyTableWindow: public RenderNativeWindow, public GodleyTableEditor
   {
+    CLASSDESC_ACCESS(GodleyTableWindow);
+  protected:
+    bool redraw(int, int, int width, int height) override {
+      if (surface.get()) {
+        draw(surface->cairo());
+        return true;
+      }
+      return false;
+    }
   public:
-    GodleyTableWindow(const std::shared_ptr<GodleyIcon>& g): GodleyTableEditor(g) {}
-    bool redraw(int, int, int width, int height) override
-    {if (surface.get()) draw(surface->cairo()); return surface.get();}
+    using GodleyTableEditor::draw;
+    GodleyTableWindow(GodleyIcon& g): GodleyTableEditor(g) {}
     void requestRedraw() {if (surface.get()) surface->requestRedraw();}
-   
+    void requestRedrawCanvas() override {requestRedraw();}
+
+    void mouseDown(float x, float y) override {GodleyTableEditor::mouseDown(x,y);}
+    void mouseUp(float x, float y) override {GodleyTableEditor::mouseUp(x,y);}
+    void mouseMove(float x, float y) override {GodleyTableEditor::mouseMove(x,y);}
+    void zoom(double, double, double z) override {GodleyTableEditor::zoomFactor*=z; requestRedraw();}
+    double zoomFactor() const override {return GodleyTableEditor::zoomFactor;}
+    bool keyPress(const EventInterface::KeyPressArgs& args) override
+    {GodleyTableEditor::keyPress(args.keySym,args.utf8); return true;}
+    bool hasScrollBars() const override {return true;}
   };
 
 }

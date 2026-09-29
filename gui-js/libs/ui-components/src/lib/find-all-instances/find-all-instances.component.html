@@ -1,0 +1,21 @@
+<div class="instance_container">
+  @for (instance of instances; track instance; let i = $index) {
+    <div
+      class="instance"
+      (click)="goToInstance(i)"
+      >
+      {{ instance }}
+    </div>
+  }
+</div>
+
+<footer>
+  <button
+    mat-raised-button
+    type="submit"
+    class="submit"
+    (click)="closeWindow()"
+    >
+    OK
+  </button>
+</footer>

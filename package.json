@@ -1,0 +1,19 @@
+{
+  "name": "minskyRESTService",
+  "version": "0.0.0",
+  "description": "nodejs embedded RESTService",
+  "main": "testAddon.js",
+  "private": true,
+  "scripts": {
+    "start": "ts-node test/testAddon"
+  },
+  "dependencies": {
+    "bindings": "^1.5.0",
+    "typescript": "^5.8.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.10",
+    "node-addon-api": "^8.4.0",
+    "ts-node": "^10.9.2"
+  }
+}

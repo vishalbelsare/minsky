@@ -35,12 +35,12 @@ namespace minsky
                euler, pi, zero, one, inf, percent,// fundamental constants
                // multiwire binary ops
                add, subtract, multiply, divide, min, max, 
+               // underscores to avoid C++ keywords. Can be filtered at UI
                and_, or_,
                // single wire binops
                log, pow, polygamma, 
-               lt, le, eq, 
+               lt, le, eq,
                userFunction,
-               // underscores to avoid C++ keywords. Can be filtered at UI
                // functions
                copy, sqrt, exp, ln, sin, cos, tan, asin, acos, atan,
                sinh, cosh, tanh, abs,
@@ -48,14 +48,16 @@ namespace minsky
                // reductions
                sum, product, infimum, supremum, any, all, infIndex, supIndex,
                // scans
-               runningSum, runningProduct, difference,
+               runningSum, runningAv, runningProduct, difference, differencePlus,
                // other tensor ops
-               innerProduct, outerProduct, index, gather,
+               innerProduct, outerProduct, index, gather, meld, merge, slice, size, shape, 
+               // statistics
+               mean, median, stdDev, moment, histogram, covariance, correlation, linearRegression, bulkLinearRegression,
                numOps // last operation, for iteration purposes
     };
     /// return the symbolic name of \a type
     static std::string typeName(int type);
-    enum Group {general, constop, binop, function, reduction, scan, tensor};
+    enum Group {general, constop, binop, function, reduction, scan, tensor, statistics};
     static Group classify(Type t);
   };
 

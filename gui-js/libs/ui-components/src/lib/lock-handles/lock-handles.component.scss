@@ -1,0 +1,17 @@
+.container {
+  .form-body {
+    overflow-y: auto;
+
+    .header-cell {
+        font-weight: bold;
+    }
+
+    .form-cell {
+        margin: 0px 5px;
+        
+        select {
+            width: 100%;
+        }
+    }
+  }
+}

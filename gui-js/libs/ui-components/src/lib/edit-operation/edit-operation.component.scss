@@ -1,0 +1,39 @@
+@use '../../../../shared/src/lib/theme/common-style' as *;
+
+form {
+  width: 100vw;
+  height: 100vh;
+
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: stretch;
+
+  overflow: hidden;
+
+  .form-body {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+
+    overflow-y: auto;
+  }
+
+  .form-title {
+    font-weight: bold;
+
+    padding: 10px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .form-buttons {
+    margin: 0px;
+    button {
+      margin: 5px;
+    }
+  }
+}

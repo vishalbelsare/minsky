@@ -17,8 +17,8 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef LOCK_H
-#define LOCK_H
+#ifndef MINSKY_LOCK_H
+#define MINSKY_LOCK_H
 
 #include "item.h"
 #include "ravelState.h"
@@ -31,6 +31,9 @@ namespace minsky
   {
   public:
     Lock();
+    Lock(const Lock& x): ItemT<Lock>(x) {addPorts();}
+    Lock& operator=(const Lock& x)=default;
+    void addPorts();
     ravel::RavelState lockedState;
 
     bool locked() const {return !lockedState.empty();}
@@ -38,10 +41,11 @@ namespace minsky
 
     static SVGRenderer lockedIcon;
     static SVGRenderer unlockedIcon;
-    void draw(cairo_t* cairo) const override;
+    void draw(const ICairoShim& cairoShim) const override;
     Units units(bool) const override;
     /// Ravel this is connected to. nullptr if not connected to a Ravel
     Ravel* ravelInput() const;
+    void applyLockedStateToRavel() const;
   };
 }
 

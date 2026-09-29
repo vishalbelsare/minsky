@@ -1,0 +1,1449 @@
+import {
+  CanvasItem,ClassType,
+  minsky, DataOp, GodleyIcon, Group, IntOp, Lock, numLinkGroupColours, OperationBase, PlotWidget, PubTab,
+  Ravel, RenderNativeWindow, Sheet, SwitchIcon,VariableBase, VariableValue, Functions, events
+} from '@minsky/shared';
+import { BrowserWindow, Menu, MenuItem, IpcMainEvent } from 'electron';
+import { BookmarkManager } from './BookmarkManager';
+import { CommandsManager } from './CommandsManager';
+import { WindowManager } from './WindowManager';
+import log from 'electron-log';
+import JSON5 from 'json5';
+
+export class ContextMenuManager {
+  private static x: number = null;
+  private static y: number = null;
+
+  private static showAllPlotsOnTabChecked = false;
+  
+  public static async initContextMenu(event: IpcMainEvent, x: number, y: number, type: string, command: string) {
+    const mainWindow = WindowManager.getMainWindow();
+    this.x = x;
+    this.y = y;
+
+    switch (type)
+    {
+      case "canvas":
+      {
+        const currentTab = WindowManager.currentTab;
+        if (currentTab.$equal(minsky.canvas))
+          this.initContextMenuForWiring(mainWindow);
+        else if (currentTab.$equal(minsky.phillipsDiagram))
+          this.initContextMenuForPhillipsDiagram(mainWindow);
+        else
+          this.initContextMenuForPublication(event, mainWindow,currentTab);
+      }
+      break;
+      case 'publication-button':
+      this.initContextMenuForPublicationTabButton(event,command);
+      break;
+      case "godley":
+      this.initContextMenuForGodleyPopup(command,x,y);
+      break;
+      case "html-godley":
+      this.initContextMenuForGodleyHTMLPopup(event, command,x,y);
+      break;
+      case "ravel":
+      this.initContextMenuForRavelPopup(command,x,y);
+      break;
+      case "csv-import":
+      this.initContextMenuForCSVImport(event, command,x,y);
+      break;
+      default:
+      log.warn("Unknown context menu for ",type);
+      break;
+    }
+  }
+
+  public static async initClickMenu(event: IpcMainEvent, x: number, y: number, type: string, command: string) {
+    const mainWindow = WindowManager.getMainWindow();
+    this.x = x;
+    this.y = y;
+
+    if(type === 'canvas' && WindowManager.currentTab.$equal(minsky.canvas)) {
+      this.leftMouseGodley(mainWindow);
+    }
+  }
+
+  private static async initContextMenuForPublication(event: IpcMainEvent, mainWindow: BrowserWindow, currentTab: RenderNativeWindow) {
+    let pubTab=new PubTab(currentTab);
+    const menuItems = [
+      new MenuItem({
+        label: 'Add note: please just type note directly for now',
+        click: ()=>{
+        },
+        enabled: false,
+      }),
+      new MenuItem({
+        label: 'Rotate item',
+        click: () => pubTab.rotateItemAt(this.x,this.y),
+        enabled: await pubTab.getItemAt(this.x,this.y),
+      }),
+      new MenuItem({
+        label: 'Toggle editor mode',
+        click: () => pubTab.toggleEditorModeAt(this.x,this.y),
+        enabled: await pubTab.getItemAt(this.x,this.y),
+      }),
+      new MenuItem({
+        label: 'Remove item',
+        click: () => pubTab.removeItemAt(this.x,this.y),
+        enabled: await pubTab.getItemAt(this.x,this.y),
+      }),
+    ];
+
+      ContextMenuManager.buildAndDisplayContextMenu(menuItems, mainWindow);
+
+      return;
+  }
+  
+  private static async initContextMenuForPublicationTabButton(event: IpcMainEvent, command: string) {
+    let pubTab=new PubTab(command);
+    const menuItems = [
+      new MenuItem({
+        label: 'Rename publication tab',
+        click:  async () => {
+          await CommandsManager.renamePubTab(command);
+          event.sender.send(events.PUB_TAB_REMOVED);
+        }
+      }),
+       new MenuItem({
+        label: 'Remove publication tab',
+        click: async () => {
+          event.sender.send(events.CHANGE_MAIN_TAB);
+          setTimeout(async ()=>{
+            await pubTab.removeSelf();
+            event.sender.send(events.PUB_TAB_REMOVED);
+          },100); // allow enough time for renderer to switch to canvas tabs before removing this tab
+        }
+      }),
+    ];
+
+    ContextMenuManager.buildAndDisplayContextMenu(menuItems, WindowManager.getMainWindow());
+
+    return;
+  }
+  
+  private static async initContextMenuForPhillipsDiagram(mainWindow: BrowserWindow) {
+      const menuItems = [
+        new MenuItem({
+          label: 'Rotate',
+          click: () => minsky.phillipsDiagram.startRotatingItem(this.x,this.y),
+        }),
+      ];
+
+      ContextMenuManager.buildAndDisplayContextMenu(menuItems, mainWindow);
+  }
+
+  private static async initContextMenuForWiring(mainWindow: BrowserWindow) {
+    const isWirePresent = await minsky.canvas.getWireAt(this.x, this.y);
+
+    const isWireVisible = await minsky.canvas.wire.visible();
+    const itemInfo = await CommandsManager.getItemInfo(this.x, this.y);
+
+    if (isWirePresent && isWireVisible && (itemInfo?.classType != ClassType.Group || itemInfo?.displayContents)) {
+      ContextMenuManager.buildAndDisplayContextMenu(
+        ContextMenuManager.wireContextMenu(),
+        mainWindow
+      );
+      return;
+    }
+
+
+    if (itemInfo?.classType) {
+      switch (itemInfo?.classType) {
+        case ClassType.GodleyIcon:
+          ContextMenuManager.buildAndDisplayContextMenu(
+            await ContextMenuManager.rightMouseGodley(itemInfo),
+            mainWindow
+          );
+          break;
+
+        case ClassType.Group:
+          ContextMenuManager.buildAndDisplayContextMenu(
+            await ContextMenuManager.rightMouseGroup(itemInfo),
+            mainWindow
+          );
+          break;
+
+        default:
+          ContextMenuManager.buildAndDisplayContextMenu(
+            await ContextMenuManager.contextMenu(itemInfo),
+            mainWindow
+          );
+
+          break;
+      }
+
+      return;
+    }
+    
+    ContextMenuManager.buildAndDisplayContextMenu(
+      await ContextMenuManager.canvasContext(),
+      mainWindow
+    );
+
+    return;
+  }
+
+  private static async leftMouseGodley(mainWindow: BrowserWindow) {
+    const itemInfo = await CommandsManager.getItemInfo(this.x, this.y);
+    if(itemInfo?.classType === ClassType.GodleyIcon) {
+      let godley=new GodleyIcon(minsky.canvas.item);
+      minsky.nameCurrentItem(await godley.id());
+      const editorModeChecked = await godley.editorMode();
+
+      const zoomFactor = await godley.editor.zoomFactor();
+      const editorX = await godley.toEditorX(this.x) / zoomFactor;
+      const editorY = await godley.toEditorY(this.y) / zoomFactor;
+      const col = await godley.editor.colX(editorX);
+      const clickType = await godley.editor.clickType(editorX, editorY);
+
+      if(editorModeChecked && clickType === 'importStock') {
+        const stockImportMenuItems=[];
+        let importOptions=await godley.editor.matchingTableColumnsByCol(col);
+        for (let v of importOptions) {
+          stockImportMenuItems.push({
+            label: v,
+            click: (item) => godley.editor.importStockVarByCol(item.label, col)
+          });
+        }
+        ContextMenuManager.buildAndDisplayContextMenu(
+          stockImportMenuItems,
+          mainWindow,
+          false
+        );  
+      }
+    }
+  }
+
+  private static async rightMouseGodley(
+    itemInfo: CanvasItem
+  ): Promise<MenuItem[]> {
+    if (await CommandsManager.selectVar(this.x, this.y)) {
+      const menuItems: MenuItem[] = [
+        new MenuItem({
+          label: 'Copy',
+          click: () => minsky.canvas.copyItem()
+        }),
+        new MenuItem({
+          label: 'Rename all instances',
+          click: () => CommandsManager.renameAllInstances(itemInfo)
+        }),
+      ];
+
+      return menuItems;
+    } else {
+      return await ContextMenuManager.contextMenu(itemInfo);
+    }
+  }
+
+  private static async rightMouseGroup(
+    itemInfo: CanvasItem
+  ): Promise<MenuItem[]> {
+    if (await CommandsManager.selectVar(this.x, this.y)) {
+      const menuItems = [
+        new MenuItem({
+          label: 'Edit',
+          click: () => CommandsManager.editVar(),
+        }),
+        new MenuItem({
+          label: 'Copy',
+          click: () => minsky.canvas.copyItem()
+        }),
+        new MenuItem({
+          label: 'Remove',
+          click: () => minsky.canvas.removeItemFromItsGroup()
+        }),
+      ];
+
+      return menuItems;
+    } else {
+      return await ContextMenuManager.contextMenu(itemInfo);
+    }
+  }
+
+  private static wireContextMenu(): MenuItem[] {
+    const menuItems = [
+      new MenuItem({
+        label: 'Description',
+        click: () => CommandsManager.postNote('wire')
+      }),
+      new MenuItem({
+        label: 'Straighten',
+        click: () => minsky.canvas.wire.straighten()
+      }),
+      new MenuItem({
+        label: 'Delete wire',
+        click: () => minsky.canvas.deleteWire()
+      }),
+    ];
+
+    return menuItems;
+  }
+
+  private static async canvasContext(): Promise<MenuItem[]> {
+    const selectedItems = minsky.canvas.selection.items;
+    const selectionSize = await selectedItems.size();
+    const ravelsSelected = await minsky.canvas.ravelsSelected();
+
+    const menuItems = [
+      new MenuItem({
+        label: 'Cut',
+        click: () => minsky.cut(),
+        enabled: selectionSize > 0
+      }),
+      new MenuItem({
+        label: 'Copy selection',
+        click: () => minsky.copy(),
+        enabled: selectionSize > 0
+
+      }),
+      new MenuItem({
+        label: 'Save selection as',
+        click: () => CommandsManager.saveSelectionAsFile(),
+        enabled: selectionSize > 0
+      }),
+      new MenuItem({
+        label: 'Paste selection',
+        click: () => CommandsManager.pasteAt(this.x, this.y)
+      }),
+
+      new MenuItem({
+        label: 'Bookmark here',
+        click: () => CommandsManager.bookmarkAt(this.x, this.y)
+      }),
+      new MenuItem({
+        label: 'Group',
+        click: () => minsky.canvas.groupSelection()
+      }),
+      new MenuItem({
+        label: 'Link selected Ravels',
+        click: () => minsky.canvas.lockRavelsInSelection(),
+        enabled: ravelsSelected > 1
+      }),
+      new MenuItem({
+        label: 'Unlink selected Ravels',
+        click: () => minsky.canvas.unlockRavelsInSelection(),
+        enabled: ravelsSelected > 0
+      }),
+      new MenuItem({
+        label: 'Open master group',
+        click: async () => {
+          await minsky.openModelInCanvas();
+          await BookmarkManager.updateBookmarkList();
+        }
+      }),
+          ];
+
+    return menuItems;
+  }
+
+  private static buildAndDisplayContextMenu(
+    menuItems: MenuItem[],
+    mainWindow: Electron.BrowserWindow,
+    withHelp = true
+  ) {
+    if (menuItems.length) {
+      const menu = Menu.buildFromTemplate((withHelp ? [
+        new MenuItem({
+          label: 'Help',
+          visible:
+          WindowManager.currentTab.$equal(minsky.canvas),
+          click: () => CommandsManager.help(this.x, this.y),
+        })] : []).concat(menuItems),
+      );
+
+      menu.popup({
+        window: mainWindow,
+        x: Math.round(this.x + WindowManager.leftOffset),
+        y: Math.round(this.y + WindowManager.topOffset + WindowManager.electronTopOffset),
+      });
+    }
+  }
+
+  private static exportAsCSVSubmenu(item: any) {
+    return [
+          {
+            label: 'Save by datapoint per row',
+            click: () => CommandsManager.exportItemAsCSV(item)
+          },
+          {
+            label: 'Save by series per row',
+            click: () => CommandsManager.exportItemAsCSV(item,true)
+          },
+    ];
+  }
+  
+  private static async contextMenu(itemInfo: CanvasItem) {
+    let menuItems: MenuItem[] = [
+      new MenuItem({
+        label: 'Description',
+        click: async () => await CommandsManager.postNote('item')
+      }),
+    ];
+
+    switch (itemInfo?.classType) {
+      case ClassType.Variable:
+      case ClassType.VarConstant:
+        menuItems = [
+          ...menuItems,
+          ...(await ContextMenuManager.buildContextMenuForVariables(itemInfo)),
+          new MenuItem({
+            label: `Rotate ${itemInfo.classType}`,
+            click: () => minsky.canvas.rotateItem(this.x, this.y)
+          }),
+        ];
+        break;
+
+      case ClassType.Operation:
+      case ClassType.IntOp:
+      case ClassType.DataOp:
+      case ClassType.UserFunction:
+        menuItems = [
+          ...menuItems,
+          ...(await ContextMenuManager.buildContextMenuForOperations(itemInfo)),
+          new MenuItem({
+            label: `Rotate ${itemInfo.classType}`,
+            click: () => minsky.canvas.rotateItem(this.x, this.y)
+          }),
+        ];
+        break;
+
+      case ClassType.PlotWidget:
+        menuItems = [
+          ...menuItems,
+          ...(await ContextMenuManager.buildContextMenuForPlotWidget(itemInfo)),
+        ];
+        break;
+
+      case ClassType.GodleyIcon:
+        menuItems = [
+          ...menuItems,
+          ...(await ContextMenuManager.buildContextMenuForGodleyIcon(itemInfo)),
+        ];
+
+        break;
+
+      case ClassType.Group:
+        menuItems = [
+          ...menuItems,
+          ...(await ContextMenuManager.buildContextMenuForGroup()),
+          new MenuItem({
+            label: `Rotate ${itemInfo.classType}`,
+            click:  () => minsky.canvas.rotateItem(this.x, this.y)
+          }),
+        ];
+        break;
+
+      case ClassType.Item:
+        menuItems = [
+          ...menuItems,
+          new MenuItem({
+            label: 'Copy item',
+            click: () => minsky.canvas.copyItem()
+          }),
+          new MenuItem({
+            label: `Rotate ${itemInfo.classType}`,
+            click:  () => minsky.canvas.rotateItem(this.x, this.y)
+          }),
+        ];
+
+        break;
+
+      case ClassType.SwitchIcon:
+        menuItems = [
+          ...menuItems,
+          ...(await ContextMenuManager.buildContextMenuForSwitchIcon()),
+        ];
+
+        break;
+
+      case ClassType.Ravel:
+        menuItems = [
+          ...menuItems,
+          ...(await ContextMenuManager.buildContextMenuForRavel(new Ravel(minsky.canvas.item))),
+        ];
+
+        break;
+
+      case ClassType.Lock:
+        menuItems = [
+          ...menuItems,
+          ...(await ContextMenuManager.buildContextMenuForLock()),
+        ];
+
+        break;
+
+    case ClassType.Sheet:
+      let sheet=new Sheet(minsky.canvas.item);
+      menuItems = [
+          ...menuItems,
+        new MenuItem({
+          label: 'Row Slices',
+          submenu: [
+            {
+              label: 'Head',
+              click: () => sheet.showRowSlice("head")
+            },
+            {
+              label: 'Tail',
+              click: () => sheet.showRowSlice("tail")
+            },
+            {
+              label: 'Head & Tail',
+              click: () => sheet.showRowSlice("headAndTail")
+            },
+         ]
+        }),
+        new MenuItem({
+          label: 'Column Slices',
+          submenu: [
+            {
+              label: 'Head',
+              click: () => sheet.showColSlice("head")
+            },
+            {
+              label: 'Tail',
+              click: () => sheet.showColSlice("tail")
+            },
+            {
+              label: 'Head & Tail',
+              click: () => sheet.showColSlice("headAndTail")
+            },
+         ]
+        }),
+        new MenuItem({
+          label: 'Export as CSV',
+          submenu: this.exportAsCSVSubmenu(sheet),
+        }),
+      ];
+      break;
+      default:
+        break;
+    }
+
+    menuItems = [
+      ...menuItems,
+      new MenuItem({
+        label: 'Add item to a publication tab',
+        submenu: await ContextMenuManager.pubTabMenu(),
+      }),
+      new MenuItem({
+        label: 'Align',
+        submenu: Menu.buildFromTemplate(this.alignmentMenu()),
+      }),
+      new MenuItem({
+        label: `Delete ${itemInfo.classType}`,
+        click: () => CommandsManager.deleteCurrentItemHavingId(itemInfo.id)
+      }),
+      // put a separator at the bottom to prevent unintentional deletions
+      new MenuItem({
+        label: '      ',
+        enabled: false,
+      }),
+    ];
+    
+    return menuItems;
+  }
+
+  private static async pubTabMenu() {
+    let pubTabs=await minsky.publicationTabs.$properties();
+    let menu=[];
+    for (let i=0; i<pubTabs.length; ++i) {
+      let j=i;
+      menu.push({
+        label: pubTabs[i].name,
+        click: ()=>{minsky.addCanvasItemToPublicationTab(j);}
+      });
+    }
+    return menu;
+  }
+  
+  private static async buildContextMenuForPlotWidget(
+    itemInfo: CanvasItem
+  ): Promise<MenuItem[]> {
+    const plot=new PlotWidget(minsky.canvas.item);
+
+    const menuItems = [
+      new MenuItem({
+        label: 'Expand',
+        click: () => CommandsManager.expandPlot(itemInfo)
+      }),
+      new MenuItem({
+        label: 'Make Group Plot',
+        click: () => plot.makeDisplayPlot()
+      }),
+      new MenuItem({
+        label: 'Options',
+        click: () => CommandsManager.openPlotWindowOptions(itemInfo)
+      }),
+      new MenuItem({
+        label: 'Set options as default',
+        click: () => minsky.canvas.setDefaultPlotOptions()
+      }),
+      new MenuItem({
+        label: 'Apply default options',
+        click: () => minsky.canvas.applyDefaultPlotOptions()
+      }),
+      new MenuItem({
+        label: 'Pen Styles',
+        click: () => {
+          WindowManager.createPopupWindowWithRouting({
+            title: `Pen Styles`,
+            url: `#/headless/menu/context-menu/pen-styles`,
+            height: 700,
+            width: 350,
+          });
+        },
+      }),
+      new MenuItem({
+        label: 'Export as CSV',
+        click: () => CommandsManager.exportItemAsCSV(plot)
+      }),
+      new MenuItem({
+        label: 'Export Image As',
+        submenu: [
+          {
+            label: 'SVG',
+            click: () => CommandsManager.exportItemAsImageDialog(plot, 'svg', 'SVG')
+          },
+          {
+            label: 'PDF',
+            click: () => CommandsManager.exportItemAsImageDialog(plot, 'pdf', 'PDF')
+          },
+          {
+            label: 'PostScript',
+            click: () => CommandsManager.exportItemAsImageDialog(plot, 'ps', 'PostScript')
+          },
+          {
+            label: 'EMF',
+            visible: Functions.isWindows(),
+            click: () => CommandsManager.exportItemAsImageDialog(plot, 'emf', 'EMF')
+          },
+          {
+            label: 'Portable Network Graphics',
+            click: () => CommandsManager.exportItemAsImageDialog(plot, 'png', 'Portable Network Graphics')
+          },
+        ],
+      }),
+    ];
+
+    return menuItems;
+  }
+
+  private static async buildContextMenuForGodleyIcon(
+    itemInfo: CanvasItem
+  ): Promise<MenuItem[]> {
+    let godley=new GodleyIcon(minsky.canvas.item);
+    minsky.nameCurrentItem(await godley.id());
+    const displayVariableChecked = await godley.variableDisplay();
+    const rowColButtonsChecked = await godley.buttonDisplay();
+    const editorModeChecked = await godley.editorMode();
+
+    const zoomFactor = await godley.editor.zoomFactor();
+    const editorX = await godley.toEditorX(this.x) / zoomFactor;
+    const editorY = await godley.toEditorY(this.y) / zoomFactor;
+    const row=await godley.editor.rowY(editorY);
+    const col=await godley.editor.colX(editorX);
+    const clickType = await godley.editor.clickType(editorX, editorY);
+
+    if(editorModeChecked && clickType !== 'background') {
+      this.initContextMenuForGodley(godley, row, col, clickType, () => godley.editor.update());
+      return;
+    }
+
+    const menuItems = [
+      new MenuItem({
+        label: 'Open Godley Table',
+        click: () => {
+          CommandsManager.openGodleyTable(itemInfo.id);
+        }
+      }),
+      new MenuItem({
+        label: 'Open All Godley Tables',
+        click: () => {CommandsManager.openAllGodleyTables();}
+      }),
+      new MenuItem({
+          label: 'Close All Godley Tables',
+          click() {CommandsManager.closeAllGodleyTables();},
+      }),
+      new MenuItem({
+        label: 'Title',
+        click: () => CommandsManager.editGodleyTitle(godley),
+      }),
+      new MenuItem({
+        label: 'Set currency',
+        click: () => CommandsManager.setGodleyCurrency(),
+      }),
+      new MenuItem({
+        label: 'Editor mode',
+        checked: editorModeChecked,
+        type: 'checkbox',
+        click: () => godley.toggleEditorMode()
+      }),
+      new MenuItem({
+        label: 'Row/Col buttons',
+        checked: rowColButtonsChecked,
+        type: 'checkbox',
+        click: () => godley.toggleButtons()
+      }),
+      new MenuItem({
+        label: 'Display variables',
+        type: 'checkbox',
+        checked: displayVariableChecked,
+        click: async () => {
+          await godley.toggleVariableDisplay();
+          await minsky.canvas.requestRedraw();
+        }
+      }),
+      new MenuItem({
+        label: 'Display values',
+        type: 'checkbox',
+        checked: await godley.displayValues(),
+        click: async () => {
+          await godley.toggleDisplayValues();
+          await minsky.canvas.requestRedraw();
+        },
+      }),
+      new MenuItem({
+        label: 'Copy flow variables',
+        click: () => minsky.canvas.copyAllFlowVars()
+      }),
+      new MenuItem({
+        label: 'Copy stock variables',
+        click: () => minsky.canvas.copyAllStockVars()
+      }),
+      new MenuItem({
+        label: 'Export as',
+        submenu: [
+          {
+            label: 'CSV',
+            click: () => CommandsManager.exportGodleyAs('csv')
+          },
+          {
+            label: 'LaTeX',
+            click: () => CommandsManager.exportGodleyAs('tex')
+          },
+        ],
+      }),
+    ];
+    return menuItems;
+  }
+
+  private static async buildContextMenuForOperations(
+    itemInfo: CanvasItem
+  ): Promise<MenuItem[]> {
+    let op=new OperationBase(minsky.canvas.item);
+
+    let portValues;
+    await op.portValues().
+      then((x)=>{portValues=x;}).
+      catch((x)=>{portValues = 'unknown';});
+
+    let menuItems = [
+      new MenuItem({ label: `Port values ${portValues}` }),
+      new MenuItem({
+        label: 'Edit',
+        click: () => CommandsManager.editItem(itemInfo.classType)
+      }),
+    ];
+
+    // TODO data is obsolete
+    if (await op.type() === 'data') {
+      menuItems.push(
+        new MenuItem({
+          label: 'Import Data',
+          click: async () => {
+            const filePath = await CommandsManager.getFilePathUsingSaveDialog();
+            if (filePath) {await (new DataOp(op)).readData(filePath);}
+          }
+        })
+      );
+    }
+
+    menuItems = [
+      ...menuItems,
+      new MenuItem({
+        label: 'Copy item',
+        click: () => minsky.canvas.copyItem()
+      }),
+      new MenuItem({
+        label: 'Flip',
+        click: () => CommandsManager.flip()
+      }),
+    ];
+
+    if (await op.type() === 'integrate') {
+      menuItems.push(
+        new MenuItem({
+          label: 'Toggle var binding',
+          click: async () => {
+            await (new IntOp(op)).toggleCoupled();
+            await CommandsManager.requestRedraw();
+          },
+        })
+      );
+      menuItems.push(
+        new MenuItem({
+          label: 'Select all instances',
+          click: () => minsky.canvas.selectAllVariables()
+        })
+      );
+      menuItems.push(
+        new MenuItem({
+          label: 'Rename all instances',
+          click: () => CommandsManager.renameAllInstances(itemInfo),
+        })
+      );
+    }
+    return menuItems;
+  }
+
+  private static async buildContextMenuForGroup(): Promise<MenuItem[]> {
+    let group=new Group(minsky.canvas.item);
+    const menuItems = [
+      new MenuItem({
+        label: 'Edit',
+        click: () => CommandsManager.editItem(ClassType.Group),
+      }),
+      new MenuItem({
+        label: 'Open in canvas',
+        click: async () => {
+          await minsky.openGroupInCanvas();
+          await BookmarkManager.updateBookmarkList();
+        }
+      }),
+      new MenuItem({
+        label: 'Zoom to display',
+        click: async () => {
+          await minsky.canvas.zoomToDisplay();
+          await CommandsManager.requestRedraw();
+        },
+      }),
+      new MenuItem({
+        label: 'Remove plot icon',
+        click: async () => {
+          await group.removeDisplayPlot();
+          await CommandsManager.requestRedraw();
+        },
+      }),
+      new MenuItem({
+        label: 'Copy',
+        click: () => minsky.canvas.copyItem()
+      }),
+      new MenuItem({
+        label: 'Make subroutine',
+        click: () => group.makeSubroutine()
+      }),
+      new MenuItem({
+        label: 'Save group as',
+        click: () => CommandsManager.saveGroupAsFile(),
+      }),
+      new MenuItem({
+        label: 'Flip',
+        click: () => CommandsManager.flip(),
+      }),
+      new MenuItem({
+        label: 'Flip Contents',
+        click: async () => {
+          await group.flipContents();
+          await CommandsManager.requestRedraw();
+        },
+      }),
+      new MenuItem({
+        label: 'Resize icon on contents',
+        click: async () => {
+          await group.resizeOnContents();
+          await CommandsManager.requestRedraw();
+        },
+      }),
+      new MenuItem({
+        label: 'Ungroup',
+        click: async () => {
+          await minsky.canvas.ungroupItem();
+          await CommandsManager.requestRedraw();
+        },
+      }),
+    ];
+
+    return menuItems;
+  }
+
+  private static async buildContextMenuForRavel(ravel: Ravel): Promise<MenuItem[]> {
+    const aggregations = [{label: 'Σ', value: 'sum'},{label: 'Π', value: 'prod'},{label:'av',value:'av'},{label: 'σ', value: 'stddev'},{label: 'min', value: 'min'},{label: 'max', value: 'max'}];
+
+    const handleIndex = await ravel.selectedHandle();
+    const sortOrder = await ravel.sortOrder();
+    const editorMode = await ravel.editorMode();
+
+    const ravelsSelected = await minsky.canvas.ravelsSelected();
+    // may be null if ravel.lockGroup is null, ie ravel is not part of a "RavelLockGroup"
+    const allLockHandles = await ravel.lockGroup.allLockHandles();
+
+    const linkHandlesAvailable = ravelsSelected > 1 || allLockHandles!==null && allLockHandles.length>0;
+    const unlinkAvailable = allLockHandles!==null;
+    const handleAvailable = handleIndex !== -1;
+
+    let linkGroupColours=await ravel.lockGroupColours();
+    let linkGroups=[];
+    for (let i=0; i<linkGroupColours.length; ++i) {
+      let icon=`${__dirname}/assets/linkGroup${linkGroupColours[i]%numLinkGroupColours}.png`;
+      linkGroups.push(new MenuItem({
+        icon: icon,
+        click: ()=>{ravel.joinLockGroup(linkGroupColours[i]);}
+      }));
+    }
+    
+    let menuItems = [
+      new MenuItem({
+        label: 'Editor mode',
+        type: 'checkbox',
+        checked: editorMode,
+        click: () => ravel.toggleEditorMode()
+      }),
+      new MenuItem({
+        label: 'Connect to database',
+        enabled: await ravel.db.ravelPro(),
+        click: () => {
+          WindowManager.createPopupWindowWithRouting({
+            title: 'Connect to database',
+            url: '#/headless/connect-database',
+            height: 120,
+            width: 250,
+          })
+        },
+      }),
+      new MenuItem({
+        label: 'Set numerical axes',
+        enabled: await ravel.db.ravelPro(),
+        click: () => {
+          WindowManager.createPopupWindowWithRouting({
+            title: 'Set numerical axes',
+            url: '#/headless/ravel-select-horizontal-dim',
+            height: 400,
+            width: 400,
+          })
+        },
+      }),
+      new MenuItem({
+        label: 'Export as CSV',
+        submenu: this.exportAsCSVSubmenu(ravel),
+      }),
+      new MenuItem({
+        label: 'Set next aggregation',
+        submenu: aggregations.map(agg => ({
+          label: agg.label,
+          click: () => ravel.nextReduction(agg.value)
+        }))
+      }),
+      new MenuItem({
+        label: 'Collapse all handles',
+        click: () => ravel.collapseAllHandles(true)
+      }),
+      new MenuItem({
+        label: 'Expand all handles',
+        click: () => ravel.collapseAllHandles(false)
+      }),
+      new MenuItem({
+        label: 'Flip',
+        click: async () => {await ravel.flipped(!await ravel.flipped());}
+      }),
+      new MenuItem({ 
+        label: 'Link specific handles',
+        click: () => CommandsManager.lockSpecificHandles(ravel),
+        enabled: linkHandlesAvailable 
+      }),
+      new MenuItem({ 
+        label: 'Join Link Group',
+        submenu: linkGroups,
+      }),
+      new MenuItem({
+        label: 'Unlink',
+        enabled: unlinkAvailable,
+        click: async () => {
+          await ravel.leaveLockGroup();
+          await CommandsManager.requestRedraw();
+        },
+      })
+    ];
+
+    let valueSort=(type: string,dir: string)=>{
+      return type+dir[0].toUpperCase()+dir.slice(1);
+    };
+    menuItems.push(...[
+      new MenuItem({
+        label: 'Toggle axis calipers',
+        enabled: handleAvailable,
+        click: async () => {
+          await ravel.toggleDisplayFilterCaliper();
+          await ravel.broadcastStateToLockGroup();
+        }
+      }),
+      new MenuItem({
+        label: 'Sort axis',
+        enabled: handleAvailable,
+        submenu: ['none','forward','reverse'].map(so =>(<any>{
+          label: so,
+          type: 'radio',
+          checked: sortOrder == so,
+          click: async () => {
+            await ravel.setSortOrder(so);
+            await ravel.broadcastStateToLockGroup();
+            await minsky.requestReset();
+          }
+        })),
+      }),
+      new MenuItem({
+        label: 'Sort by value',
+        enabled: await ravel.handleSortableByValue(),
+        submenu: [
+          <any>{
+            label: 'none',
+            type: 'radio',
+            checked: sortOrder == 'none',
+            click: async () => {
+              await ravel.setSortOrder('none');
+              await ravel.broadcastStateToLockGroup();
+              await minsky.requestReset();
+            },
+          }].concat(
+            ['forward','reverse'].map(vso =>(<any>{
+              label: `${vso} statically`,
+              type: 'radio',
+              checked: sortOrder == valueSort('static',vso),
+              click: async () => {
+                await ravel.sortByValue(vso);
+                await ravel.setSortOrder(valueSort('static',vso));
+                await ravel.broadcastStateToLockGroup();
+                await minsky.reset();
+              }
+            }))).concat(
+              ['forward','reverse'].map(vso =>(<any>{
+                label: `${vso} dynamically`,
+                type: 'radio',
+                checked: sortOrder == valueSort('dynamic',vso),
+                click: async () => {
+                  await ravel.sortByValue(vso);
+                  await ravel.setSortOrder(valueSort('dynamic',vso));
+                  await ravel.broadcastStateToLockGroup();
+                  await minsky.reset();
+                }
+              }))),
+      }),
+      new MenuItem({
+        label: 'Pick axis slices',
+        enabled: handleAvailable,
+        click: () => CommandsManager.pickSlices(ravel,handleIndex)
+      }),
+    new MenuItem({
+      label: 'Axis properties',
+      enabled: handleAvailable,
+      submenu: [
+        {
+          label: 'Description',
+          click: async () => CommandsManager.editHandleDescription(ravel,handleIndex)
+        },
+        {
+          label: 'Dimension',
+          click: async () => CommandsManager.editHandleDimension(ravel,handleIndex)
+        },
+        {
+          label: 'Set aggregation',
+          submenu: aggregations.map(agg => ({
+            label: agg.label,
+            click: () => ravel.handleSetReduction(handleIndex, agg.value)
+          }))
+        }
+      ]
+    })]);
+
+    return menuItems;
+  }
+
+  private static async buildContextMenuForSwitchIcon(): Promise<MenuItem[]> {
+    let switchIcon=new SwitchIcon(minsky.canvas.item);
+    const menuItems = [
+      new MenuItem({
+        label: 'Add case',
+        click: async () => {await switchIcon.setNumCases(await switchIcon.numCases()+1);},
+      }),
+      new MenuItem({
+        label: 'Delete case',
+        click: async () => {await switchIcon.setNumCases(await switchIcon.numCases()-1);},
+      }),
+      new MenuItem({
+        label: 'Flip',
+        click: async () => {
+          await CommandsManager.flipSwitch();
+        },
+      }),
+    ];
+
+    return menuItems;
+  }
+
+  private static async buildContextMenuForLock(): Promise<MenuItem[]> {
+    let ravel=new Lock(minsky.canvas.item);
+    return [
+      new MenuItem({
+        label: (await ravel.locked())? 'Unlock': 'Lock',
+        click: () => ravel.toggleLocked()
+      }),
+      new MenuItem({
+        label: 'Apply state to Ravel',
+        click: () => ravel.applyLockedStateToRavel()
+      }),
+      
+    ];
+  }
+
+  private static async buildContextMenuForVariables(
+    itemInfo: CanvasItem
+  ): Promise<MenuItem[]> {
+    let dims = null;
+
+    if (
+      itemInfo?.classType === ClassType.Variable ||
+      itemInfo?.classType === ClassType.VarConstant
+    ) {
+      dims = await CommandsManager.getItemDims();
+    }
+
+    let v=new VariableBase(minsky.canvas.item);
+    let miniPlot=await v.miniPlotEnabled();
+    
+    const menuItems = [
+      dims && dims.length
+        ? new MenuItem({ label: `Dims ${await dims.toString()}` })
+        : new MenuItem({ label: `Value ${await v.value()}` }),
+      new MenuItem({
+        label: "Local",
+        type: 'checkbox',
+        checked: await v.local(),
+        click: () => v.toggleLocal()
+      }),
+      new MenuItem({
+        label: 'Find definition',
+        click: () => CommandsManager.findDefinition()
+      }),
+      new MenuItem({
+        label: 'Select all instances',
+        click: () => minsky.canvas.selectAllVariables()
+      }),
+      new MenuItem({
+        label: 'Find all instances',
+        click: () => CommandsManager.findAllInstances(),
+      }),
+      new MenuItem({
+        label: 'Rename all instances',
+        click: () => CommandsManager.renameAllInstances(itemInfo),
+      }),
+      new MenuItem({
+        label: 'Edit',
+        click: () => CommandsManager.editVar(),
+      }),
+      new MenuItem({
+        label: 'Copy item',
+        click: () => minsky.canvas.copyItem()
+      }),
+      new MenuItem({
+        label: 'Add integral',
+        click: () => minsky.addIntegral()
+      }),
+      new MenuItem({
+        label: 'Mini Plot',
+        type: 'checkbox',
+        checked: miniPlot,
+        click: () => v.miniPlotEnabled(!miniPlot)
+      }),
+    ];
+
+    menuItems.push(
+      new MenuItem({
+        label: 'Flip',
+        click: () => CommandsManager.flip(),
+      })
+    );
+
+    if (await v.type() === 'parameter') {
+      menuItems.push(
+        new MenuItem({
+          label: 'Import CSV',
+          click: async () => {
+            await CommandsManager.importCSV(minsky.variableValues.elem(await v.valueId()));
+          },
+        })
+      );
+      menuItems.push(
+        new MenuItem({
+          label: 'Reimport CSV',
+          click: async () => {
+            await v.reloadCSV();
+            await minsky.requestReset();
+          },
+        })
+      );
+    }
+
+    menuItems.push(
+      new MenuItem({
+        label: 'Export as CSV',
+        submenu: this.exportAsCSVSubmenu(v),
+      })
+    );
+
+    return menuItems;
+  }
+
+  private static async initContextMenuForGodleyHTMLPopup(event: IpcMainEvent, command: string, r: number, c: number)
+  {
+    const parsed = JSON5.parse(command);
+    const godley=new GodleyIcon(parsed[0]);
+
+    const refreshFunction = async () => event.sender.send(events.GODLEY_POPUP_REFRESH);
+      
+    this.initContextMenuForGodley(godley, r, c, parsed[1], refreshFunction);
+  }
+
+  private static async initContextMenuForGodleyPopup(namedItemSubCommand: string, x: number, y: number)
+  {
+    const godley=new GodleyIcon(namedItemSubCommand);
+    const r=await godley.popup.rowYZoomed(y);
+    const c=await godley.popup.colXZoomed(x);
+    const clickType = await godley.popup.clickTypeZoomed(x, y);
+    this.initContextMenuForGodley(godley, r, c, clickType, CommandsManager.requestRedraw);
+  }
+
+  private static async initContextMenuForGodley(godley: GodleyIcon, r: number, c: number, clickType: string, refreshFunction: () => Promise<void>)
+  {
+    var menu=new Menu();
+
+    menu.append(new MenuItem({
+      label: "Help",
+      click: async ()=> {await CommandsManager.loadHelpFile("GodleyTable");},
+    }));
+    
+    menu.append(new MenuItem({
+      label: "Title",
+      click: async ()=> {
+        await CommandsManager.editGodleyTitle(godley);
+        await refreshFunction();
+      },
+    }));
+
+    switch (clickType)
+    {
+      case "background": break;
+      case "row0":
+      menu.append(new MenuItem({
+        label: "Add new stock variable",
+        click: async ()=> {
+          await godley.popup.addStockVarByCol(c);
+          await refreshFunction();
+        },
+      }));
+      
+      var importMenu=new Menu();
+      var importables=await godley.popup.matchingTableColumnsByCol(c);
+      for (var i in importables)
+        importMenu.append(new MenuItem({
+          label: importables[i],
+          click: async (item)=> {
+            await godley.popup.importStockVarByCol(item.label, c);
+            await refreshFunction();
+          },
+        }));
+      
+      menu.append(new MenuItem({
+        label: "Import variable",
+        submenu: importMenu,
+      }));
+      
+      menu.append(new MenuItem({
+        label: "Delete stock variable",
+        click: async ()=> {
+          await godley.popup.deleteStockVarByCol(c);
+          await refreshFunction();
+        },
+      }));
+      break;
+      case "col0":
+      menu.append(new MenuItem({
+        label: "Add flow",
+        click: async ()=> {
+          await godley.popup.addFlowByRow(r);
+          await refreshFunction();
+        },
+      }));
+      menu.append(new MenuItem({
+        label: "Delete flow",
+        click: async ()=> {
+          await godley.popup.deleteFlowByRow(r);
+          await refreshFunction();
+        },
+      }));
+      break;
+      case "internal": break;
+    } // switch clickType
+    
+    const selecteds = await Promise.all([godley.popup.selectedRow(),godley.popup.selectedCol()]);
+    if (r!=selecteds[0] || c!=selecteds[1])
+    {
+      await Promise.all([godley.popup.selectedRow(r), godley.popup.selectedCol(c), godley.popup.insertIdx(0), godley.popup.selectIdx(0)]);
+    }
+    var cell=await godley.table.getCell(r,c);
+    if (cell.length>0 && (r!=1 || c!=0))
+    {
+      menu.append(new MenuItem({
+        label: "Cut",
+        click: async ()=> {
+          await godley.popup.cut();
+          await refreshFunction();
+        }
+      }));
+      menu.append(new MenuItem({
+        label: "Copy",
+        click: async ()=> {godley.popup.copy();}
+      }));
+    }
+    
+    if (r!=1 || c!=0)
+    {
+      var clip=await minsky.clipboardEmpty();
+      menu.append(new MenuItem({
+        label: "Paste",
+        enabled: !clip,
+        click: async ()=> {
+          await godley.popup.paste();
+          await refreshFunction();
+        }
+      }));
+    }
+    const flows=await godley.table.getVariables();
+    var flowMenu=new Menu();
+    for (let i=0; i<flows.length; ++i)
+      flowMenu.append(new MenuItem({
+        label: flows[i],
+        submenu: [
+          {
+            label: '+',
+            click: async ()=>{
+              await godley.table.setCell(r,c,flows[i]);
+              await refreshFunction();
+            }
+          },
+          {
+            label: '-',
+            click: async ()=>{
+              await godley.table.setCell(r,c,`-${flows[i]}`);
+              await refreshFunction();
+            }
+          },
+        ]            
+      }));
+    menu.append(new MenuItem({
+      label: 'Insert flow',
+      submenu: flowMenu,
+    }));
+
+    if ((await godley.table.assetClass())[c]==="equity")
+      menu.append(new MenuItem({
+        label: 'Balance equity',
+        click: async ()=>{
+          await godley.table.balanceEquity(c);
+          await refreshFunction();
+        }
+      }));
+    
+    menu.popup();
+  }
+  
+  private static async initContextMenuForRavelPopup(namedItemSubCommand: string, x: number, y: number)
+  {
+    let ravel=new Ravel(namedItemSubCommand);
+    let menu=Menu.buildFromTemplate(await this.buildContextMenuForRavel(ravel));
+    menu.popup();
+  }
+
+  private static async initContextMenuForCSVImport(event: IpcMainEvent, variableValue: string, row: number, col: number)
+  {
+    const refresh=()=>event.sender.send(events.REFRESH_CSV_IMPORT);
+    const value=new VariableValue(variableValue);
+    var menu=Menu.buildFromTemplate([
+      new MenuItem({
+        label: 'Set as header row',
+        click: async ()=>{
+          await value.spec.headerRow(row);
+          refresh();
+        },
+      }),
+      new MenuItem({
+        label: 'Auto-classify columns as axis/data',
+        click: async ()=>{
+          await value.classifyColumns();
+          refresh();
+        },
+      }),
+      new MenuItem({
+        label: 'Populate column labels',
+        click: async ()=>{
+          await value.populateHeaders();
+          refresh();
+        },
+      }),
+      new MenuItem({
+        label: 'Populate current column label',
+        click: async ()=>{
+          await value.populateHeader(col);
+          refresh();
+        },
+      }),
+      new MenuItem({
+        label: 'Set start of data row, and column',
+        click: async ()=>{
+          await value.spec.setDataArea(row,col);
+          refresh();
+        },
+      }),
+      new MenuItem({
+        label: 'Set start of data row',
+        click: async ()=>{
+          let c=await value.spec.nColAxes();
+          await value.spec.setDataArea(row,c);
+          refresh();
+        },
+      }),
+      new MenuItem({
+        label: 'Set start of data column',
+        click: async ()=>{
+          let r=await value.spec.nRowAxes();
+          await value.spec.setDataArea(r,col);
+          refresh();
+        },
+      }),
+      ]);
+    menu.popup();
+  }
+
+  static alignmentMenu() {
+     const labels: [string, string][] = [
+       ['left', 'Left'],
+       ['centre', 'Centre'],
+       ['right', 'Right'],
+       ['left_right', 'Left & Right'],
+       ['top', 'Top'],
+       ['middle', 'Middle'],
+       ['bottom', 'Bottom'],
+       ['top_bottom', 'Top & Bottom'],
+       ['equal_width', 'Equal width'],
+       ['equal_height', 'Equal height'],
+     ];
+    return labels.map(([alignment, label]) =>
+       new MenuItem({
+         label,
+         click: async ()=>{await minsky.canvas.alignSelection(alignment);},
+       })
+     );
+  }
+}
+

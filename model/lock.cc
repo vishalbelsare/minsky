@@ -17,10 +17,17 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "cairoItems.h"
 #include "lock.h"
 #include "wire.h"
 #include "selection.h"
+#include "lasso.h"
 #include <cairo_base.h>
+#include "itemT.rcd"
+#include "lock.rcd"
+#include "lock.xcd"
+#include "minsky.h"
+#include "cairoShimCairo.h"
 #include "minsky_epilogue.h"
 using namespace std;
 
@@ -31,13 +38,19 @@ namespace minsky
 
   Lock::Lock()
   {
-    tooltip="Double click to lock/unlock";
+    tooltip("Double click to lock/unlock");
     iWidth(30);
     iHeight(30);
+    addPorts();
+  }
+
+  void Lock::addPorts()
+  {
+    m_ports.clear();
     m_ports.emplace_back(make_shared<Port>(*this));
-    m_ports[0]->moveTo(15,0);
+    m_ports[0]->moveTo(x()+15,y());
     m_ports.emplace_back(make_shared<InputPort>(*this));
-    m_ports[1]->moveTo(-15,0);
+    m_ports[1]->moveTo(x()-15,y());
   }
 
   Ravel* Lock::ravelInput() const
@@ -56,31 +69,41 @@ namespace minsky
       lockedState.clear();
     else
       if (auto* r=ravelInput())
-        lockedState=r->getState();
+        {
+          // need to a full reset at this point, not delayed
+          minsky::minsky().reset();
+          lockedState=r->getState();
+          tooltip(ravelCAPI::description(lockedState));
+        }
+      else
+        throw_error("Locks can only be applied to Ravels");
   }
 
-  void Lock::draw(cairo_t* cairo) const 
+  void Lock::draw(const ICairoShim& cairoShim) const 
   {
-    SVGRenderer* icon=locked()? &lockedIcon: &unlockedIcon;
-    float z=zoomFactor()*scaleFactor();
-    float w=iWidth()*z, h=iHeight()*z;
+    const float z=zoomFactor()*scaleFactor();
+    const float w=iWidth()*z, h=iHeight()*z;
 
-    ecolab::cairo::CairoSave cs(cairo);
-    cairo_translate(cairo,-0.5*w,-0.5*h);
-    cairo_scale(cairo, w/icon->width(), h/icon->height());
-    icon->render(cairo);
+    {
+      cairoShim.save();
+      cairoShim.translate(-0.5*w,-0.5*h);
+      SVGRenderer* icon=locked()? &lockedIcon: &unlockedIcon;
+      // Render SVG using ICairoShim abstraction
+      cairoShim.renderSVG(*icon, w, h);
+      cairoShim.restore();
+    }
     
     if (mouseFocus)
       { 		  
-        drawPorts(cairo);
-        displayTooltip(cairo,tooltip);
-        if (onResizeHandles) drawResizeHandles(cairo);
+        drawPorts(cairoShim);
+        displayTooltip(cairoShim,tooltip());
+        if (onResizeHandles) drawResizeHandles(cairoShim);
       }	       
 
     // add 8 pt margin to allow for ports
-    cairo_rectangle(cairo,-0.5*w-8,-0.5*h-8,w+16,h+8);
-    cairo_clip(cairo);
-    if (selected) drawSelected(cairo);
+    cairoShim.rectangle(-0.5*w-8,-0.5*h-8,w+16,h+8);
+    cairoShim.clip();
+    if (selected) drawSelected(cairoShim);
   }
 
   Units Lock::units(bool check) const
@@ -101,7 +124,7 @@ namespace minsky
                     // find which handle number this is
                     // TODO - is there a way of avoiding this second loop?
                     size_t i=0;
-                    for (; i<r->numHandles(); ++i)
+                    for (; i<r->maxRank(); ++i)
                       if (r->handleDescription(i)==h.description)
                         {
                           multiplier*=r->numSliceLabels(i);
@@ -118,4 +141,13 @@ namespace minsky
     return m_ports[1]->units(check);
   }
 
+  void Lock::applyLockedStateToRavel() const
+  {
+    if (auto ravel=ravelInput())
+      ravel->applyState(lockedState);
+  }
+
+
 }
+
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Lock);

@@ -19,10 +19,6 @@
 #ifndef EVALOP_H
 #define EVALOP_H
 
-#include <ecolab.h>
-#include <xml_pack_base.h>
-#include <xml_unpack_base.h>
-
 #include "variableValue.h"
 #include "operation.h"
 #include "group.h"
@@ -75,6 +71,10 @@ namespace minsky
 
     /// state data (for those ops that need it)
     std::shared_ptr<OperationBase> state;
+    [[noreturn]] void throw_error(const std::string& msg) const {
+      if (state) state->throw_error(msg);
+      else throw std::runtime_error(msg);
+    }
     virtual ~EvalOpBase() {}
 
     /**
@@ -95,8 +95,8 @@ namespace minsky
     /// evaluate expression on sv and current value of fv, storing result
     /// in output variable (of \a fv)
     /// @param n - size of fv array
-    virtual void eval(double fv[]=&ValueVector::flowVars[0], std::size_t n=ValueVector::flowVars.size(), 
-                      const double sv[]=&ValueVector::stockVars[0])=0;
+    virtual void eval(double fv[]=ValueVector::flowVars.data(), std::size_t n=ValueVector::flowVars.size(), 
+                      const double sv[]=ValueVector::stockVars.data())=0;
  
 
     /// set additional tensor operation related parameters
@@ -106,6 +106,7 @@ namespace minsky
   /// Legacy EvalOp base interface
   struct ScalarEvalOp: public EvalOpBase
   {
+    std::shared_ptr<VariableValue> result; ///< lifetime management of the resultant variableValue
     /// number of arguments to this operation
     virtual int numArgs() const =0;
 
@@ -154,11 +155,12 @@ namespace minsky
     EvalOpPtr(EvalOpBase* e): classdesc::shared_ptr<EvalOpBase>(e) {}
     EvalOpPtr(OperationType::Type op):
       classdesc::shared_ptr<EvalOpBase>(ScalarEvalOp::create(op,nullptr)) {}
+    /// \a to cannot be null
     EvalOpPtr(OperationType::Type op,
               const ItemPtr& state,
-              VariableValue& to,
-              const VariableValue& from1=VariableValue(), 
-              const VariableValue& from2=VariableValue());
+              const std::shared_ptr<VariableValue>& to,
+              const VariableValue& from1={}, 
+              const VariableValue& from2={});
   };
 
   struct EvalOpVector: public vector<EvalOpPtr>
@@ -167,13 +169,15 @@ namespace minsky
 //       void push_back(const EvalOpPtr& x) {
 //         vector<EvalOpPtr>::push_back(x);
 //         for (std::size_t i=0; i<x->in1.size(); ++i)
+//           if (auto s=dynamic_cast<ScalarEvalOp*>(x.get()))
 //           {
-//             cout << OperationType::typeName(x->type())<<"(";
-//             if (x->numArgs()>0)
-//               cout << x->in1[i]<<(x->flow1?"":"s");
-//             if (x->numArgs()>1)
-//               cout<<","<<x->in2[i]<<(x->flow2?"":"s");
-//             cout <<")->"<<x->out+i<<endl;
+//             cout << OperationType::typeName(s->type())<<"(";
+//             if (s->numArgs()>0)
+//               cout << s->in1[i]<<(s->flow1?"":"s");
+//             if (s->numArgs()>1)
+//               for (auto& i: s->in2[i])
+//                 cout<<","<<i.idx<<"("<<i.weight<<")"<<(s->flow2?"":"s");
+//             cout <<")->"<<s->out+i<<endl;
 //           }
 //       }
   };

@@ -19,7 +19,7 @@
 #ifndef PORT_H
 #define PORT_H
 #include "classdesc_access.h"
-#include "variableValue.h"
+#include "units.h"
 #include <error.h>
 #include <vector>
 #include <memory>
@@ -29,31 +29,46 @@ namespace minsky
   class Item;
   class Wire;
   class Group;
+  class VariableValue;
   typedef std::shared_ptr<Group> GroupPtr;
 
-  class Port
+  /// components of Port excluded from reflection
+  struct PortExclude
   {
+    // const_cast hack required to work around classdesc::Exclude API
+    PortExclude(const Item& item): m_item(const_cast<Item&>(item)) {}
+    virtual ~PortExclude()=default;
+    /// sets the VariableValue associated with this port. Only for output ports
+    void setVariableValue(const std::shared_ptr<VariableValue>& v);
+    /// returns the variableValue associated with this port. May be null if not applicable
+    std::shared_ptr<VariableValue> getVariableValue() const;
+    virtual bool input() const=0;
+    GroupPtr group() const;
+  protected:
+    Item& m_item;
+    std::weak_ptr<VariableValue> variableValue; //refers to variable value representing this port
+    std::vector<Wire*> m_wires;
+  };
+  
+  class Port: public classdesc::Exclude<PortExclude>
+  {
+  public:
   private:
     float m_x{0}, m_y{0};
-    int flags{0};
     CLASSDESC_ACCESS(Port);
     friend struct SchemaHelper;
     Port(const Port&)=delete;
     void operator=(const Port&)=delete;
-    std::weak_ptr<VariableValue> variableValue; //refers to variable value representing this port
-    std::vector<Wire*> m_wires;
     friend class Wire;
-    Item& m_item;
   public:
     /// @{ owner of this port
     // this is an accessor to prevent serialisation infinite loops
     Item& item() {return m_item;};
     const Item& item() const {return m_item;}
     /// @}
-    GroupPtr group() const;
 
     /// returns a vector of weak references to the wires attached to this port
-    const std::vector<Wire*>& wires() const {return m_wires;}
+    std::vector<Wire*> const& wires() const {return m_wires;}
     std::size_t numWires() const {return m_wires.size();}
     
     /// remove wire from wires. No ownership passed.
@@ -78,16 +93,11 @@ namespace minsky
     float x() const;
     float y() const;
     void moveTo(float x, float y);
-    //Port() {}
-    Port(Item& item): m_item(item) {}
+    Port(Item& item): classdesc::Exclude<PortExclude>(item) {}
 
     // destruction of this port must also destroy all attached wires
     ~Port() {deleteWires();}
 
-    /// sets the VariableValue associated with this port. Only for output ports
-    void setVariableValue(const std::shared_ptr<VariableValue>& v);
-    /// returns the variableValue associated with this port. May be null if not applicable
-    std::shared_ptr<VariableValue> getVariableValue() const;
     /// value associated with this port
     double value() const;
     Units units(bool) const;
@@ -100,8 +110,17 @@ namespace minsky
     bool input() const override {return true;}
     InputPort(Item& item): Port(item) {}
   };
+  
+  struct MultiWireInputPort: public InputPort
+  {
+    bool multiWireAllowed() const override {return true;}
+    MultiWireInputPort(Item& item): InputPort(item) {}
+  };
 }
 
+#ifdef CLASSDESC
+#pragma omit RESTProcess minsky::PortExclude
+#endif
+
 #include "port.cd"
-#include "port.xcd"
 #endif

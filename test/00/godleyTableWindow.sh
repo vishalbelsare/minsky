@@ -1,74 +1,45 @@
 #! /bin/sh
 
 here=`pwd`
-if test $? -ne 0; then exit 2; fi
-tmp=/tmp/$$
-mkdir $tmp
-if test $? -ne 0; then exit 2; fi
-cd $tmp
-if test $? -ne 0; then exit 2; fi
+. $here/test/common-test.sh
 
-fail()
-{
-    echo "FAILED" 1>&2
-    cd $here
-    chmod -R u+w $tmp
-    rm -rf $tmp
-    exit 1
-}
+cat >input.py <<EOF
+from pyminsky import minsky, findObject
+minsky.defaultFont('Sans')
 
-pass()
-{
-    echo "PASSED" 1>&2
-    cd $here
-    chmod -R u+w $tmp
-    rm -rf $tmp
-    exit 0
-}
-
-trap "fail" 1 2 3 15
-cat >input.tcl <<EOF
-source $here/test/assert.tcl
-minsky.defaultFont Sans
-
-proc afterMinskyStarted {} {
-  minsky.load $here/examples/1Free.mky
-  minsky.multipleEquities 1
-  findObject GodleyIcon
-  set id [minsky.openGodley]
-  openGodley \$id
-  \$id.displayStyle sign
-  \$id.displayValues 1
-  \$id.renderToSVG 1FreeBase.svg
-  \$id.selectedCol 1
-  \$id.selectedRow 2
-  \$id.insertIdx 0
-  \$id.selectIdx 3
-  \$id.hoverRow 2
-  \$id.hoverCol 2
-  \$id.mouseMoveB1 [expr [lindex [\$id.colLeftMargin] 2]+10] [expr 4*[\$id.rowHeight]+[\$id.topTableOffset]]
-  \$id.displayStyle DRCR
-  \$id.renderToSVG 1Free11Selected.svg
-  \$id.selectedCol 0
-  \$id.renderToSVG 1FreeSelectedRow.svg
-  \$id.selectedCol 1
-  \$id.selectedRow 0
-  \$id.mouseMoveB1 [expr [lindex [\$id.colLeftMargin] 2]+10] [expr 3*[\$id.rowHeight]+[\$id.topTableOffset]]
-  \$id.renderToSVG 1FreeSelectedCol.svg
+minsky.load('$here/examples/1Free.mky')
+minsky.multipleEquities(True)
+minsky.displayStyle('sign')
+item=findObject('GodleyIcon')
+item.displayValues(True)
+gw=item.popup
+gw.enableButtons()
+gw.renderToSVG('1FreeBase.svg')
+gw.selectedCol(1)
+gw.selectedRow(2)
+gw.insertIdx(0)
+gw.selectIdx(3)
+gw.hoverRow(2)
+gw.hoverCol(2)
+gw.mouseMoveB1(gw.colLeftMargin()[2]+10, 4*gw.rowHeight()+gw.topTableOffset())
+minsky.displayStyle('DRCR')
+gw.renderToSVG('1Free11Selected.svg')
+gw.selectedCol(0)
+gw.renderToSVG('1FreeSelectedRow.svg')
+gw.selectedCol(1)
+gw.selectedRow(0)
+gw.mouseMoveB1(gw.colLeftMargin[2]+10, 3*gw.rowHeight()+gw.topTableOffset())
+gw.renderToSVG('1FreeSelectedCol.svg')
   
-
-  minsky.load $here/examples/LoanableFunds.mky
-  findObject GodleyIcon
-  set id [minsky.openGodley]
-  \$id.displayStyle DRCR
-  \$id.displayValues 0
-  \$id.renderToSVG LoanableFundsBase.svg
-
-  tcl_exit
-}
+minsky.load('$here/examples/LoanableFunds.mky')
+item=findObject('GodleyIcon')
+minsky.displayStyle('DRCR')
+item.displayValues(False)
+item.popup.enableButtons()
+item.popup.renderToSVG('LoanableFundsBase.svg')
 EOF
 
-$here/gui-tk/minsky input.tcl
+python3 input.py
 if [ $? -ne 0 ]; then fail; fi
 
 for i in *.svg; do

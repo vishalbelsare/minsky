@@ -4,41 +4,61 @@ DEBUG=1
 ECOLAB_HOME=../ecolab
 
 ifneq ($(MAKECMDGOALS),clean)
+ifneq ($(COMPILER),"")
+# rewrite CPLUSPLUS after clobber in Makefile
+CPLUSPLUS:=$(COMPILER)
+$(warning $(CPLUSPLUS) , $(COMPILER))
+endif
 include $(ECOLAB_HOME)/include/Makefile
+ifneq ($(COMPILER),"")
+# rewrite CPLUSPLUS after clobber in Makefile
+CPLUSPLUS=$(COMPILER)
+$(warning $(COMPILER))
+endif
 endif
 
-VPATH= .. ../schema ../model ../engine ../tensor ../RESTService ../RavelCAPI $(ECOLAB_HOME)/include
+# link statically to ecolab (needed until all bugs in EcoLab 6 ironed out)
+LIBS:=$(subst -lecolab,$(ECOLAB_HOME)/lib/libecolab.a,$(LIBS)) 
 
-UNITTESTOBJS=main.o testCSVParser.o testDerivative.o testExpressionWalker.o testGrid.o testItemTab.o testLatexToPango.o testLockGroup.o testMdl.o testMinsky.o testModel.o testSaver.o testStr.o testTensorOps.o testUnits.o testUserFunction.o testVariable.o testXVector.o
+VPATH= .. ../schema ../model ../engine ../RESTService ../RavelCAPI/civita ../RavelCAPI $(ECOLAB_HOME)/include
 
-MINSKYOBJS=$(filter-out ../tclmain.o ../RESTService.o,$(wildcard ../*.o))
-FLAGS:=-I.. -I../RESTService -I../tensor -I../RavelCAPI $(FLAGS)
-FLAGS+=-std=c++14  -Wno-unused-local-typedefs -I../model -I../engine -I../schema
-LIBS+=-L../RavelCAPI -lravelCAPI -ljson_spirit -lboost_system -lboost_thread \
-	-lboost_regex -lboost_date_time -lboost_filesystem \
-	-lUnitTest++ -lgsl -lssl -lcrypto -lgslcblas  -lxml2 -ltiff -ldl
+GTESTOBJS=testCSVParser.o testCanvas.o testDataOp.o testDatabaseIngestor.o testDerivative.o testExpressionWalker.o testGrid.o testLatexToPango.o testLock.o testLockGroup.o testMdl.o testMdlReader.o testMinsky.o testModel.o testPannableTab.o testPhillips.o testPlotWidget.o testPubTab.o testSaver.o testSheet.o testStr.o testTensorOps.o testUnits.o testUserFunction.o testVariable.o testVariablePane.o testXVector.o testZStream.o ticket-1461.o
+
+MINSKYOBJS=localMinsky.o ../libminsky.a
+FLAGS:=-I.. -I../RESTService -I../RavelCAPI/civita -I../RavelCAPI  -I../model -I../engine -I../schema $(FLAGS)
+FLAGS+=-std=c++20  -DJSON_PACK_NO_FALL_THROUGH_TO_STREAMING -DUSE_UNROLLED -DCLASSDESC_ARITIES=0xf \
+  -Wno-unknown-warning-option -Wno-unused-local-typedefs -Wno-unused-command-line-argument
+LIBS+=-L../RavelCAPI -lravelCAPI -L../RavelCAPI/civita -lcivita \
+	-lboost_filesystem -lboost_system -lboost_thread \
+	-lboost_date_time -lclipboard \
+	-lgsl -lssl -lcrypto -lgslcblas  -lxml2 -ltiff -ldl
+
+ifdef MXE
+else
+LIBS+=-lxcb -lX11
+endif
+
+#ifdef OPENMP
+FLAGS+=-fopenmp
+LIBS+=-fopenmp
+#endif
 
 # RSVG dependencies calculated here
 FLAGS+=$(shell pkg-config --cflags librsvg-2.0)
 LIBS+=$(shell pkg-config --libs librsvg-2.0)
 
-JSON_SPIRIT_HEADER=$(call search,include/json_spirit)
-ifneq ($(JSON_SPIRIT_HEADER),)
-  FLAGS+=-I$(JSON_SPIRIT_HEADER)
-endif
-FLAGS+=-DJSON_SPIRIT_MVALUE_ENABLED
-
 EXES=cmpFp checkSchemasAreSame
 #testDatabase testGroup 
 
-ifdef AEGIS
-#EXES+=tcl-cov
+
+ifdef ASAN
+FLAGS+=-fsanitize=address -fno-omit-frame-pointer
 endif
 
 all: unittests $(EXES)
 
-unittests: $(UNITTESTOBJS) $(MINSKYOBJS)
-	$(CPLUSPLUS) $(FLAGS)  -o $@ $(UNITTESTOBJS) $(MINSKYOBJS) $(LIBS)
+unittests: gtestUnittests.o $(GTESTOBJS) $(MINSKYOBJS)
+	$(CPLUSPLUS) $(FLAGS)  -o $@ $^ $(LIBS) -lgtest
 
 # todo - remove dependency on all MINSKYOBJS
 testDatabase: main.o testDatabase.o $(MINSKYOBJS)
@@ -60,13 +80,13 @@ tcl-cov: tcl-cov.o $(MINSKYOBJS)
 	$(CPLUSPLUS) $(FLAGS) -o $@ $^ $(LIBS)
 
 ifneq ($(MAKECMDGOALS),clean)
-include $(UNITTESTOBJS:.o=.d) $(EXES:=.d)
+-include $(UNITTESTOBJS:.o=.d) $(GTESTOBJS:.o=.d) $(EXES:=.d) localMinsky.d
 endif
 
 BASIC_CLEAN=rm -rf *.o *~ "\#*\#" core *.d *.cd *.xcd *.gcda *.gcno
 
 clean:
-	-$(BASIC_CLEAN) unittests $(EXES)
+	-$(BASIC_CLEAN) unittests gtestUnittests $(EXES)
 	cd 00; $(BASIC_CLEAN)
 	cd exampleLogs; $(BASIC_CLEAN)
 	cd oldSchema; $(BASIC_CLEAN)

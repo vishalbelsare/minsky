@@ -1,0 +1,64 @@
+<div class="popup-wrapper">
+  <div class="form-wrapper">
+    <form [formGroup]="form">
+      <div class="align form-headers">
+        <span class="form-control dimension">Dimension</span>
+        <span class="form-control type">Type</span>
+        <span class="form-control autocomplete">Units/Format</span>
+      </div>
+      @for (control of dimensions.controls; track control; let i = $index) {
+        <ng-container
+          formArrayName="dimensions"
+          >
+          @if (dimensions.value.length) {
+            <div [formGroupName]="i" class="align">
+              <input
+                class="form-control dimension"
+                formControlName="dimension"
+                type="text"
+                />
+              <select
+                class="form-control type"
+                name="i"
+                id="i"
+                formControlName="type"
+                >
+                @for (type of types; track type) {
+                  <option [value]="type">
+                    {{ type }}
+                  </option>
+                }
+              </select>
+              <input
+                type="text"
+                formControlName="units"
+                [matAutocomplete]="auto"
+                class="form-control autocomplete"
+                />
+              <mat-autocomplete #auto="matAutocomplete">
+                @if (dimensions.controls[i].get('type').value === 'time') {
+                  @for (tfs of timeFormatStrings; track tfs) {
+                    <mat-option
+                      [value]="tfs.value"
+                      >
+                      {{ tfs.label }}
+                    </mat-option>
+                  }
+                }
+              </mat-autocomplete>
+            </div>
+          }
+        </ng-container>
+      }
+    </form>
+    <div class="form-buttons">
+      <button type="button" mat-raised-button (click)="closeWindow()">
+        Cancel
+      </button>
+
+      <button type="button" mat-raised-button (click)="handleSubmit()">
+        OK
+      </button>
+    </div>
+  </div>
+</div>

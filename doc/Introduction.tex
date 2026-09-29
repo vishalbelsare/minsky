@@ -1,223 +1,125 @@
+
 \chapter{Introduction}
-\label{Introduction}
 
-\section{New to system dynamics?}
-\label{intro:new}
-
-Minsky is one of a family of ``system dynamics'' computer
-programs. These programs allow a dynamic model to be constructed, not
-by writing mathematical equations or numerous lines of computer code,
-but by laying out a model of a system in a block diagram, which can then
-simulate the system. These programs are now the main tool used by
-engineers to design complex products, ranging from small electrical
-components right up to passenger jets.
-
-
-Minsky adds another means to create the dynamic equations that are
-needed to define monetary flows---the ``Godley Table''---which is
-discussed in the next section for users who are experienced in
-system dynamics. In this section, we'll give you a quick overview of
-the generic system dynamics approach to building a model.
-
-
-Though they differ in appearance, they all work the same way:
-variables in a set of equations are linked by wires to mathematical
-operators. What would otherwise be a long list of equations is
-converted into a block diagram, and the block diagram makes the causal chain
-in the equations explicit and visually obvious.
-
-For example, say you wanted to define the rate of employment as
-depending on output (GDP), labor productivity and population. Then you
-could define a set of equations in a suitable program (like Mathcad):
-
-\begin{eqnarray*}
-\mathrm{GDP}&:=&100\\
-\mathrm{LaborProductivity}&:=&1\\
-\mathrm{Population}&:=&100\\
-\mathrm{Workers}&:=&\mathrm{GDP}\div\mathrm{LaborProductivity}\\
-\mathrm{EmpRate}&:=&\mathrm{Workers}\div\mathrm{Population}\\
-\mathrm{EmpRate}&=&1
-\end{eqnarray*}
-
-Or you could define it using a block diagram, such as Minsky:
-
-\begin{center}
-%\fwhtmladdimg{NewItem1.png}
-\resizebox{\textwidth}{!}{\includegraphics{images/NewItem1.eps}}
-\end{center}
-
-For a simple algebraic equation like this, modern computer algebra
-programs like Mathcad are just as good as a block diagram programs like
-Vissim or Minsky. But the visual metaphor excels when you want to describe a
-complex causal chain.
-
-
-These causal chains always involve a relationship between stocks and
-flows. Economists normally model stocks and flows by adding an
-increment to a stock. For example, the level of capital $K$ is defined as
-a difference equation, where capital in year $t$ is shown as being 
-capital in year $t-1$ plus the investment that took place that year:
-
-\begin{displaymath}
-K_t=K_{t-1}+I_{t-1}
-\end{displaymath}
-
-The problem with this approach is that in reality, capital is
-accumulating on a daily, or even hourly, basis. It is better to model
-stock as continuous quantities and for this reason, all stocks and
-flows in Minsky are handled instead as integral equations. The amount
-of capital at time $t$ is shown as the integral of net investment
-between time 0 and today:
-
-\begin{displaymath}
-K(t)=\int_0^t I(s)ds
-\end{displaymath}
-
-However, rather than being shown as an equation, the relationship is shown as a diagram:
-
-\begin{center}
-\includegraphics{images/NewItem7.eps}
-\end{center}
-
-The advantages of the block diagram representation of dynamic equations
-over a list of equations are:
+\label{Introduction}\emph{Ravel} is a data analysis program which
+is an alternative to spreadsheets and existing business intelligence
+programs (Tableau, Power BI, etc.). It has two key features that distinguish
+it from all other programs in this space: 
 \begin{itemize}
-\item    They make the causal relationships in a complex model
-  obvious. It takes a specialized mind to be able to see the causal
-  relations in a large set of mathematical equations; the same
-  equations laid out as diagrams can be read by anyone who can read
-  a stock and flow diagram---and that's most of us;
-\item The block diagram paradigm makes it possible to store components of
-  a complex block diagram in a group. For example, the fuel delivery
-  system in a car can be treated as one group, the engine as another,
-  the exhaust as yet another. This reduces visual complexity and also
-  makes it possible for different components of a complex model to be
-  designed by different groups and then ``wired together'' at a later
-  stage.
+\item The Ravel, a visual representation of multidimensional data that is
+far easier to use than Pivot Tables; and
+\item Equations that are written as flowcharts, rather than the obscure
+cell references of spreadsheets.
 \end{itemize}
+It also includes the system-dynamics engine \htmlref{\emph{Minsky}}{Introduction-Minsky}.
 
-For example, here's a model of a 4 cylinder engine car---one of the
-simple examples distributed with the program Vissim:
+Unlike spreadsheets, which are fundamentally limited to two dimensions
+(rows and columns), \emph{Ravel} supports an effectively unlimited
+number of dimensions. \emph{Ravel}'s key feature---also called a
+Ravel---is a visual tool for manipulating and analysing multidimensional
+data, which can handle as many dimensions as your data contains. By
+contrast, to handle more than 2 dimensions in a spreadsheet, the go to
+tool is a {\em Pivot table}, which provides some sort of control over
+the slice through the multidimensional {\em hypercube}. Needless the
+say, pivot tables are not for the faint of heart!
 
-\begin{center}
-\fwhtmladdimg{NewItem8.png}
-\end{center}
+Ravel is primarily focussed on numerical data, although it is possible
+to analyse purely symbolic data in \htmlref{``counter mode''}{counter}.
 
-Programs like Vissim and Simulink have been in existence for almost 2
-decades, and they are now mature products that provide everything
-their user-base of engineers want for modeling and analyzing complex
-dynamic systems. \htmlref{So why has Minsky been
-  developed?}{intro:experienced}
-
-\section{Experienced in system dynamics?}
-\label{intro:experienced}
-
-As an experienced system dynamics user (or if you've just read \htmlref{``New to
-system dynamics?''}{intro:new}), what you need to know is what Minsky
-provides that other system dynamics programs don't. That boils down to
-one feature: The Godley Table. It enables a dynamic model of
-financial flows to be derived from a table that is very similar to the
-accountant's double-entry bookkeeping table.
-
-
-The dynamics in financial flows could be modeled using the block diagram
-paradigm. But it would also be very, very easy to make a mistake
-modeling financial flows in such a system, for one simple reason:
-every financial flow needs to be entered at least twice in a
-system---once as a source, and once as a sink.
-
-
-For example, if you go shopping and buy a new computer with your
-credit card, you increase your debt to a bank and simultaneously
-increase the deposit account of the retailer from whom you buy the
-computer. The two system states in this model---your credit card
-(``BuyerCredit'') and the retailer's deposit account
-(``SellerDeposit'')---therefore have to have the same entry (let's call
-this ``Card'') made into them. Such a transaction would look
-like this:
-
+This is a blank Ravel---a Ravel with no data attached to it. The
+axes are indicative examples, and will be replaced by the dimensions
+of your data, once you attach a data parameter to the Ravel:
 
 \begin{center}
-\includegraphics{images/NewItem11.eps}
+  \includegraphics{images/RavelBlank}
 \end{center}
 
-That would work, but there's nothing in the program that warns you if
-you make a mistake like, for example, wiring up the BuyerCredit entry,
-but forgetting the SellerDeposit one:
+To use a Ravel, you first need to import a data file--at present
+this must be a CSV file (other data sources will be added in later
+releases). Once the data is \htmlref{imported}{CSV import}, the data object
+can be attached to a Ravel. This is a Ravel with data attached:
 
 \begin{center}
-\includegraphics{images/NewItem12.eps}
+\includegraphics{images/01RavelDataInflation} 
 \end{center}
 
-Or, perhaps, wiring up both blocks, but giving one the wrong sign:
+There are many ways to manipulate and display data directly from a
+Ravel. This is a Ravel with data attached and selected for graphing:
+the ``Year on Year Changes'' data is selected from the Unit of Measure
+axis; two countries (Japan and the United States) are selected from
+the Reference area axis via the \emph{Pick axis slices} command; Monthly
+data is chosen from the Frequency axis; and Calipers are applied to
+the Date axis to select data from 1960 till 2024.
 
 \begin{center}
-\includegraphics{images/NewItem51.eps}
+\includegraphics[width=\textwidth]{images/01BRavelDataInflationSelected}
 \end{center}
 
-In a very complex model, you might make a mistake like one of the above, run the simulation and get nonsense results, and yet be unable to locate your mistake.
+Ravel the object itself makes it far easier to drill down into and
+visualise data than using either a spreadsheet, or the Pivot Tables
+that standard Business Intelligence program use.
 
-
-Minsky avoids this problem by using the paradigm that accountants
-developed half a millennium ago to keep financial accounts accurately:
-double-entry bookkeeping. Here is the same model in Minsky:
+\emph{Ravel} the program enables easy analysis of data using self-documenting
+flowchart formulas. This is a Ravel with data selected--for six countries,
+on the annualised monthly inflation rate, for dates from January 2001
+till January 2024--and assigned to a variable (``Post2000'').
 
 \begin{center}
-\begin{tabular}{|c|cc|c|}
-\hline
-Flows $\downarrow$ / Stock Variables
-$\rightarrow$&\multicolumn{1}{|c|}{$BuyerCredit$}&\multicolumn{1}{|c|}{$SellerDeposit$}&Row Sum\\\cline{2-3}&\multicolumn{1}{|c|}{asset}&\multicolumn{1}{|c|}{liability}&\\\hline
-Initial Conditions&$0$&$0$&0\\
-Buyer Accesses Credit&$Card$&$Card$&0\\
-\hline
-\end{tabular}
+  \includegraphics{images/02RavelDataInflationGraphed}
 \end{center}
 
-This is an inherently better way to generate a dynamic model of financial flows, for at least two reasons:
-\begin{itemize}
-\item All financial transactions are flows between entities. The
-  tabular layout captures this in a very natural way: each row shows
-  where a flow originates, and where it ends up
-\item The program adopts the accounting practice of double-entry
-  bookkeeping, in which entries on each row balance to zero according
-  to the {\em accounting equation} (Assets=Liabilities+Equities). The source is
-  shown as a positive value increasing the value of assets, the sink
-  is a positive value increasing a corresponding liability. If you
-  don't ensure that each flow starts somewhere and ends
-  somewhere---say you make the same mistake as in the block diagram
-  examples above, then the program will identify your mistake.
-\end{itemize}
+The data is analyzed by (a) working out the average inflation rate
+for the selected countries, and (b) subtracting the average from the
+actual inflation rate for each country.
 
-If you forget to enter the recipient in this transaction, then the Row
-Sum identifies your mistake by showing that the row sums to ``Card''
-rather than zero:
+The average inflation rate is calculated using the formula shown below,
+where the \buttonIcon{mean}operator works out the average
+inflation rate over time for the six countries in the variable \emph{Post2000}
+to generate the variable \emph{Inflation}\textsubscript{\emph{Average}}.
+This average is then subtracted from the country-specific data in
+\emph{Post2000}:
 
 \begin{center}
-\begin{tabular}{|c|cc|c|}
-\hline
-Flows $\downarrow$ / Stock Variables
-$\rightarrow$&\multicolumn{1}{|c|}{$BuyerCredit$}&\multicolumn{1}{|c|}{$SellerDeposit$}&Row Sum\\\cline{2-3}&\multicolumn{1}{|c|}{asset}&\multicolumn{1}{|c|}{liability}&\\\hline
-Initial Conditions&$0$&$0$&0\\
-Buyer Accesses Credit&$Card$&&$Card$\\
-\hline
-\end{tabular}
+  \includegraphics[width=\textwidth]{images/03Formula}
 \end{center}
 
-And it also identifies if you give the wrong sign to one entry:
+This one formula is applied to every country in the Ravel (six countries
+in this case) and every quarterly data point (80 quarters). Doing
+the same analysis with a spreadsheet would require writing an obscure
+cell reference formula and replicating it across 480 cells.
+
+This example shows average inflation outcomes for the six countries,
+and the deviation of each of them from the average.
 
 \begin{center}
-\begin{tabular}{|c|cc|c|}
-\hline
-Flows $\downarrow$ / Stock Variables
-$\rightarrow$&\multicolumn{1}{|c|}{$BuyerCredit$}&\multicolumn{1}{|c|}{$SellerDeposit$}&Row Sum\\\cline{2-3}&\multicolumn{1}{|c|}{asset}&\multicolumn{1}{|c|}{liability}&\\\hline
-Initial Conditions&$0$&$0$&0\\
-Buyer Accesses Credit&$Card$&$-Card$&$2Card$\\
-\hline
-\end{tabular}
+  \includegraphics{images/03RavelDataInflationAnalyzed}
 \end{center}
 
-Minsky thus adds an element to the system dynamics toolkit which is
-fundamental for modeling the monetary flows that are an intrinsic
-aspect of a market economy. Future releases will dramatically extend
-this capability. 
+This illustrates the capacity of Ravel to rapidly provide insights
+from data--in this case, that the best-performing country during
+the post-Covid inflation was Japan, and the worst performing were
+the USA and UK. This is noteworthy, because both the USA and UK sharply
+increased interest rates with the intention of reducing inflation,
+while Japan kept its interest rate constant. Perhaps then, interest
+rates aren't effective at controlling inflation rates? 
 
+These examples are drawn from economics, mainly because \emph{Ravel}'s
+inventor is an economist (and a contrarian one at that). But \emph{Ravel}
+can analyze any data you give it---marketing data, scientific data,
+production data, whatever. It can also handle enormous data sets,
+far larger than are manageable with Excel.
+ 
+Ravel can handle sparse data---it requires 16 bytes per data point, so
+for example, a 16GB computer will technically be able to handle up to a billion
+data points, although in practice it is unwise to exceed more than
+half that. There is no limit to the number of rows and columns it can
+ingest, subject to the overall limit due to available memory, in
+contrast to Excel's limits of 1,048,576 rows by 16,384 columns. One
+other limit to keep in mind is that the size of the datacube (product
+of sizes of all the dimensions) cannot exceed $1.8\times
+10^{19}$. This is something to bear in mind when importing data, as
+the datacube size increases exponentially with the number of
+dimensions.
+
+We hope these examples show how easy it is to turn data into information
+using Ravel.

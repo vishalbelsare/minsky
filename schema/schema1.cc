@@ -17,12 +17,13 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "cairoItems.h"
 #include "schema1.h"
 #include "schemaHelper.h"
 #include "factory.h"
 #include "str.h"
 #include "minsky_epilogue.h"
-#include <boost/regex.hpp>
+using namespace ecolab;
 
 namespace schema1
 {
@@ -35,10 +36,10 @@ namespace schema1
       set<int> ids;
       void insert(int id) {ids.insert(id);}
       bool operator()(const Variable& v) const {
-        return ids.count(v.id);
+        return ids.contains(v.id);
       }
       bool operator()(const shared_ptr<Layout>& l) const {
-        return l && ids.count(l->id);
+        return l && ids.contains(l->id);
       }
     };
   }
@@ -55,7 +56,7 @@ namespace schema1
     for (vector<Variable>::const_iterator v=model.variables.begin();
          v!=model.variables.end(); ++v)
       // an orphaned variable is an integral variable not attached to an integral and without
-      if (v->type==minsky::VariableType::integral && intNames.count(v->name)==0)
+      if (v->type==minsky::VariableType::integral && intNames.contains(v->name)==0)
         isOrphan.insert(v->id);
 
     model.variables.erase

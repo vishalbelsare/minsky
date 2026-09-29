@@ -1,0 +1,46 @@
+import { defaultBackgroundColor, DownloadDetails } from '@minsky/shared';
+import Store from 'electron-store';
+import {homedir} from 'node:os';
+
+interface MinskyPreferences {
+  godleyTableOutputStyle: string;
+  enableMultipleEquityColumns: boolean;
+  numberOfRecentFilesToDisplay: number;
+  wrapLongEquationsInLatexExport: boolean;
+  font: string;
+  numBackups: number;
+}
+
+interface MinskyStore {
+  recentFiles: Array<string>;
+  backgroundColor: string;
+  preferences: MinskyPreferences;
+  defaultModelDirectory: string;
+  defaultDataDirectory: string;
+  ravelPlugin: DownloadDetails|null; // used for post installation installation of Ravel
+  authToken?: string;
+  clerkClientJwt?: string;
+}
+
+class StoreManager {
+  // TODO:: We should sync the initial values with backend
+  static store = new Store<MinskyStore>({
+    defaults: {
+      recentFiles: [],
+      backgroundColor: defaultBackgroundColor,
+      defaultModelDirectory: homedir(),
+      defaultDataDirectory: homedir(),
+      preferences: {
+        godleyTableOutputStyle: 'sign',
+        enableMultipleEquityColumns: false,
+        numberOfRecentFilesToDisplay: 10,
+        wrapLongEquationsInLatexExport: false,
+        font: "",
+        numBackups: 1,
+      },
+      ravelPlugin: null,
+    },
+  });
+}
+
+export { StoreManager, MinskyPreferences };

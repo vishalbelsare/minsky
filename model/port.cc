@@ -17,15 +17,19 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "cairoItems.h"
 #include "port.h"
 #include "item.h"
 #include "wire.h"
 #include "group.h"
 #include "selection.h"
+#include "lasso.h"
 #include "operation.h"
 #include "plotWidget.h"
 #include "SVGItem.h"
 #include "switchIcon.h"
+#include "port.rcd"
+#include "port.xcd"
 #include "minsky_epilogue.h"
 using namespace std;
 
@@ -48,9 +52,9 @@ namespace minsky
     m_y=y-item().y();
   }
 
-  GroupPtr Port::group() const
+  GroupPtr PortExclude::group() const
   {
-    return item().group.lock();
+    return m_item.group.lock();
   }
 
   void Port::eraseWire(Wire* w) 
@@ -79,7 +83,7 @@ namespace minsky
   }
   
   /// sets the VariableValue associated with this port
-  void Port::setVariableValue(const std::shared_ptr<VariableValue>& v) {
+  void PortExclude::setVariableValue(const std::shared_ptr<VariableValue>& v) {
     if (!input())
       variableValue=v;
   }
@@ -107,10 +111,12 @@ namespace minsky
     return {};
   }
 
-  shared_ptr<VariableValue> Port::getVariableValue() const {
+  shared_ptr<VariableValue> PortExclude::getVariableValue() const {
     if (input() && !m_wires.empty())
       return m_wires[0]->from()->getVariableValue();
     return variableValue.lock();
   }
 
 }
+
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::Port);

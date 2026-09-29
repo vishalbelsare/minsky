@@ -19,13 +19,14 @@
 
 #ifndef FONTDISPLAY_H
 #define FONTDISPLAY_H
-#include <cairoSurfaceImage.h>
+#include "renderNativeWindow.h"
+#include "classdesc_access.h"
 #include <pango.h>
 
 namespace minsky
 {
   // display a sample of the current selected font
-  struct FontDisplay: public ecolab::CairoSurface
+  class FontDisplay: public RenderNativeWindow
   {
     bool redraw(int, int, int width, int height) override {
       cairo_move_to(surface->cairo(),0,0);
@@ -35,7 +36,11 @@ namespace minsky
       pango.show();
       return true;
     }
+    CLASSDESC_ACCESS(FontDisplay);
+  public:
     void requestRedraw() {if (surface.get()) surface->requestRedraw();}
+    FontDisplay()=default;
+    FontDisplay(const FontDisplay&)=default;
     FontDisplay& operator=(const FontDisplay&) {return *this;}
   };
 }

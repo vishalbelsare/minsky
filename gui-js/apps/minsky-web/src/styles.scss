@@ -1,0 +1,149 @@
+/* You can add global styles to this file, and also import other theme files */
+@use './../../../libs/shared/src/lib/theme/variables' as *;
+
+@font-face {
+  font-family: 'Material Icons';
+  font-style: normal;
+  font-weight: 400;
+  src: url(./../../../node_modules/material-design-icons/iconfont/MaterialIcons-Regular.eot); /* For IE6-8 */
+  src: local('Material Icons'),
+       local('MaterialIcons-Regular'),
+       url(./../../../node_modules/material-design-icons/iconfont/MaterialIcons-Regular.woff2) format('woff2'),
+       url(./../../../node_modules/material-design-icons/iconfont/MaterialIcons-Regular.woff) format('woff'),
+       url(./../../../node_modules/material-design-icons/iconfont/MaterialIcons-Regular.ttf) format('truetype');
+}
+
+.material-icons {
+ font-family: 'Material Icons';
+ font-weight: normal;
+ font-style: normal;
+ font-size: 24px;  /* Preferred icon size */
+ display: inline-block;
+ line-height: 1;
+ text-transform: none;
+ letter-spacing: normal;
+ word-wrap: normal;
+ white-space: nowrap;
+ direction: ltr;
+
+ /* Support for all WebKit browsers. */
+ -webkit-font-smoothing: antialiased;
+ /* Support for Safari and Chrome. */
+ text-rendering: optimizeLegibility;
+
+ /* Support for Firefox. */
+ -moz-osx-font-smoothing: grayscale;
+
+ /* Support for IE. */
+ font-feature-settings: 'liga';
+}
+
+
+*,
+*::after,
+*::before {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+
+  height: 100%;
+  font-family: $font-family;
+}
+
+/* CAN (MUST) BE REMOVED ! Sample Global style */
+.container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+
+  -webkit-background-size: cover; /* pour anciens Chrome et Safari */
+  background-size: cover; /* version standardized */
+
+  .title {
+    margin: 0;
+    padding: 50px 20px;
+  }
+
+  a {
+    text-transform: uppercase;
+    text-decoration: none;
+    background: $brand-danger;
+    padding: 0.4444rem;
+    border-radius: 5px;
+    display: inline-block;
+    border: none;
+    transition: all 0.4s ease 0s;
+
+    &:hover {
+      background: $white;
+      color: $brand-danger !important;
+      letter-spacing: 1px;
+      -webkit-box-shadow: 0px 5px 40px -10px rgba(0, 0, 0, 0.57);
+      -moz-box-shadow: 0px 5px 40px -10px rgba(0, 0, 0, 0.57);
+      box-shadow: 5px 40px -10px rgba(0, 0, 0, 0.57);
+      transition: all 0.4s ease 0s;
+    }
+  }
+}
+
+.wiring-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  height: 36px;
+  /* TODO:: Create a tabs component or utility. Atleast for SCSS */
+  .tab {
+    cursor: pointer;
+    width: $dimensions * 3;
+    border: 1px solid $toolbar-box;
+    background-color: $toolbar-bg;
+    border-radius: 4px;
+    margin: $margin;
+    height: $dimensions * 2;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    user-select: none;
+
+    &:focus {
+      outline: none;
+    }
+    &:active {
+      outline: none;
+      background: $white;
+
+      transform: scale(0.98);
+      /* Scaling button to 0.98 to its original size */
+      box-shadow: 3px 2px 22px 1px rgba(0, 0, 0, 0.24);
+      /* Lowering the shadow */
+    }
+  }
+
+  .mat-mdc-menu-item {
+    height: 2rem;
+    padding: 0 10px;
+  }
+
+  ::ng-deep .mat-mdc-menu-panel {
+    min-width: 50px !important;
+
+    // horizontal
+    max-width: none !important;
+    min-height: 50px !important;
+  }
+
+  // horizontal
+  ::ng-deep .mat-mdc-menu-content {
+    display: flex !important;
+  }
+}
+
+.small-autocomplete {
+  max-height: 100px !important;
+}

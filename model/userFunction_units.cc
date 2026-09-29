@@ -17,9 +17,10 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#ifndef NO_EXPRTK
+#include "minsky.h"
 #include "expressionWalker.h"
 #include "userFunction.h"
-#include "minsky.h"
 #include "minsky_epilogue.h"
 using namespace std;
 namespace minsky
@@ -40,7 +41,6 @@ namespace minsky
 
   UnitsExpressionWalker timeUnit;
   bool UnitsExpressionWalker::check=true;
-  
   Units UserFunction::units(bool check) const
   {
     UnitsExpressionWalker::check=check;
@@ -61,14 +61,14 @@ namespace minsky
         symbolTable.add_variable(argNames[i],args[i]);
       }
 
-    std::vector<std::string> externalIds=symbolNames();
+    const std::vector<std::string> externalIds=symbolNames();
     vector<ExprTkCallableFunction> externalFunctions;
     
     externalUnits.reserve(externalIds.size());
     for (auto& i: externalIds)
       {
         if (find(argNames.begin(), argNames.end(), i)!=argNames.end()) continue; // skip arguments
-        auto id=VariableValue::valueIdFromScope(group.lock(),i);
+        auto id=valueIdFromScope(group.lock(),canonicalName(i));
         auto v=minsky().variableValues.find(id);
         if (v!=minsky().variableValues.end())
           {
@@ -101,3 +101,4 @@ namespace minsky
       }
   }
 }
+#endif

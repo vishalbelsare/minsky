@@ -27,7 +27,7 @@
 #include "evalOp.h"
 #include "godleyIcon.h"
 #include "switchIcon.h"
-#include "lock.h"
+#include "model/lock.h" // to avoid clash with python header file of same name
 
 #include "operation.h"
 #include <cairo_base.h>
@@ -88,9 +88,11 @@ namespace MathDAG
     /// brackets are necessary.
     virtual int BODMASlevel() const=0; 
     /// writes LaTeX representation of this DAG to the stream
-    virtual ostream& latex(ostream&) const=0; 
+    virtual ostream& latex(ostream&) const=0;
+    std::string latexStr() const {ostringstream o; latex(o); return o.str();}
     /// writes a matlab representation of this DAG to the stream
-    virtual ostream& matlab(ostream&) const=0; 
+    virtual ostream& matlab(ostream&) const=0;
+    std::string matlabStr() const {ostringstream o; matlab(o); return o.str();}
     /// renders a visual representation of this node to \a surf
     /// graphic extends right from the current pen position (which
     /// needs to be defined), and pen is moved to the right edge of
@@ -103,7 +105,7 @@ namespace MathDAG
     /// flowVariable has been provided in \a result, that may be used
     /// directly, otherwise a copy operation is added to ensure it
     /// receives the result.
-    virtual std::shared_ptr<VariableValue> addEvalOps(EvalOpVector&, const std::shared_ptr<VariableValue>& result={})=0;
+    virtual VariableValuePtr addEvalOps(EvalOpVector&, const VariableValuePtr& result={})=0;
     /// returns evaluation order in sequence of variable defintions
     /// @param maxOrder is used to limit the recursion depth
     virtual int order(unsigned maxOrder) const=0;
@@ -123,7 +125,7 @@ namespace MathDAG
     // SystemOfEquations via a templated method.
     virtual std::shared_ptr<Node> derivative(SystemOfEquations&) const=0;
     /// reference to where this node's value is stored
-    std::shared_ptr<VariableValue> result, tmpResult{std::make_shared<VariableValue>(VariableValue::tempFlow)};
+    VariableValuePtr result;
   };
 
   typedef std::shared_ptr<Node> NodePtr;
@@ -135,9 +137,9 @@ namespace MathDAG
     const Node& operator*() const {return *payload;}
     Node* operator->() {return payload;}
     const Node* operator->() const {return payload;}
-    WeakNodePtr operator=(const NodePtr& x)
+    WeakNodePtr& operator=(const NodePtr& x)
     {payload=x.get(); return *this;}
-    WeakNodePtr operator=(Node* x)
+    WeakNodePtr& operator=(Node* x)
     {payload=x; return *this;}
     WeakNodePtr(): payload(nullptr) {}
     template <class T>
@@ -162,10 +164,20 @@ namespace MathDAG
     ostream& latex(ostream& o) const  override {return o<<value;}
     ostream& matlab(ostream& o) const  override {return o<<value;}
     void render(ecolab::cairo::Surface& surf) const override;
-    std::shared_ptr<VariableValue> addEvalOps(EvalOpVector&, const std::shared_ptr<VariableValue>&) override;
+    VariableValuePtr addEvalOps(EvalOpVector&, const VariableValuePtr&) override;
     NodePtr derivative(SystemOfEquations&) const override;
   };
 
+  struct MaxRecursionOrder: public std::exception
+  {
+    std::string message;
+    MaxRecursionOrder()=default;
+    MaxRecursionOrder(const std::string& name):
+      message("maximum order recursion reached for "+name) {}
+    const char* what() const noexcept override
+    {return message.c_str();}
+  };
+  
   class VariableDAG: public Node, public VariableType
   {
   public:
@@ -183,8 +195,15 @@ namespace MathDAG
     int order(unsigned maxOrder) const override {
       if (rhs) {
         if (cachedOrder>=0) return cachedOrder;
-        if (maxOrder==0) throw error("maximum order recursion reached");
-        return cachedOrder=rhs->order(maxOrder-1)+1;
+        if (maxOrder==0) throw MaxRecursionOrder(name);
+        try
+          {
+            return cachedOrder=rhs->order(maxOrder-1)+1;
+          }
+        catch (const MaxRecursionOrder&)
+          {
+            throw MaxRecursionOrder(name);
+          }
       }
       else
         return 0;
@@ -196,7 +215,7 @@ namespace MathDAG
     using Node::addEvalOps;
     ostream& latex(ostream&) const override;
     ostream& matlab(ostream&) const override;
-    std::shared_ptr<VariableValue> addEvalOps(EvalOpVector&, const std::shared_ptr<VariableValue>& v={}) override;
+    VariableValuePtr addEvalOps(EvalOpVector&, const VariableValuePtr& v={}) override;
     void render(ecolab::cairo::Surface& surf) const override;
     NodePtr derivative(SystemOfEquations&) const override; 
     /// adds a TensorEvalOp, returns true if successful
@@ -209,7 +228,7 @@ namespace MathDAG
   /// Variable DAG in that it doesn't refer to the VariableValue
   struct IntegralInputVariableDAG: public VariableDAG
   {
-    std::shared_ptr<VariableValue> addEvalOps(EvalOpVector&,const std::shared_ptr<VariableValue>&) override;
+    VariableValuePtr addEvalOps(EvalOpVector&,const VariableValuePtr&) override;
   };
 
   struct OperationDAGBase: public Node, public OperationType  
@@ -226,7 +245,7 @@ namespace MathDAG
     int order(unsigned maxOrder) const override;
     bool tensorEval(std::set<const Node*>&) const override;
     using Node::tensorEval;
-    std::shared_ptr<VariableValue> addEvalOps(EvalOpVector&, const std::shared_ptr<VariableValue>&) override;
+    VariableValuePtr addEvalOps(EvalOpVector&, const VariableValuePtr&) override;
     void checkArg(unsigned i, unsigned j) const;
   };
 
@@ -280,8 +299,8 @@ namespace MathDAG
     ostream& latex(ostream& o) const override  {return o<<"locked";} 
     ostream& matlab(ostream& o) const override  {return o<<"";} 
     void render(ecolab::cairo::Surface& surf) const override;
-    std::shared_ptr<VariableValue> addEvalOps(EvalOpVector&, const std::shared_ptr<VariableValue>& result={}) override;
-    int order(unsigned maxOrder) const override {return rhs->order(maxOrder-1)+1;}
+    VariableValuePtr addEvalOps(EvalOpVector&, const VariableValuePtr& result={}) override;
+    int order(unsigned maxOrder) const override {return rhs? rhs->order(maxOrder-1)+1:0;}
     bool tensorEval(std::set<const Node*>&) const override {return true;}
     std::shared_ptr<Node> derivative(SystemOfEquations&) const override
     {lock.throw_error("derivative not defined for locked objects");}
@@ -367,7 +386,7 @@ namespace MathDAG
     /// create a variable DAG. returns cached value if previously called
     NodePtr makeDAG(const string& valueId, const string& name, VariableType::Type type);
     NodePtr makeDAG(VariableBase& v)
-    {v.ensureValueExists(v.vValue().get(),v.name()); return makeDAG(v.valueId(),VariableValue::uqName(v.name()),v.type());}
+    {v.ensureValueExists(v.vValue().get()); return makeDAG(v.valueId(),uqName(v.name()),v.type());}
     /// create an operation DAG. returns cached value if previously called
     NodePtr makeDAG(const OperationBase& op);
     NodePtr makeDAG(const SwitchIcon& op);
@@ -416,6 +435,10 @@ namespace MathDAG
     NodePtr zero{new ConstantDAG("0")}, one{new ConstantDAG("1")};
     
     VariableDAGPtr getNodeFromVar(const VariableBase& v);
+    VariableDAGPtr getNodeFromValueId(const std::string& v)
+    {return dynamic_pointer_cast<VariableDAG>(expressionCache[v]);}
+    VariableDAGPtr getNodeFromIntVar(const std::string& valueId)
+    {return expressionCache.getIntegralInput(valueId);}
     ostringstream getDefFromIntVar(const VariableBase& v);
 
     /// render equations into a cairo context

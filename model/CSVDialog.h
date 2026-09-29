@@ -24,6 +24,7 @@
 #ifndef CSVDIALOG_H
 #define CSVDIALOG_H
 #include "CSVParser.h"
+#include "renderNativeWindow.h"
 #include <cairoSurfaceImage.h>
 
 #include <vector>
@@ -31,25 +32,17 @@
 
 namespace minsky
 {
-  class CSVDialog: public ecolab::CairoSurface
+  class CSVDialog
   {
     std::vector<std::string> initialLines; ///< initial lines of file
-    double rowHeight=0;
-    double m_tableWidth;
     CLASSDESC_ACCESS(DataSpec);
+    
   public:
-    static const unsigned numInitialLines=30;
-    double xoffs=80;
-    double colWidth=50;
-    bool flashNameRow=false;
+    static const unsigned numInitialLines=100;
     DataSpec spec;
     /// filename, or web url
     std::string url;
-    /// width of table (in pixels)
-    double tableWidth() const {return m_tableWidth;}
 
-    bool redraw(int, int, int width, int height) override;
-    
     /// loads an initial sequence of lines from \a url. If fname
     /// contains "://", is is treated as a URL, and downloaded from
     /// the web.
@@ -58,21 +51,25 @@ namespace minsky
     void guessSpecAndLoadFile();
     /// common implementation of loading the initial sequence of lines
     void loadFileFromName(const std::string& fname);
-    
-    /// Return file name after downloading a CSV file from the
-    /// web. Result is cached for 5 minutes.
-    static std::string loadWebFile(const std::string& url); 
     void reportFromFile(const std::string& input, const std::string& output) const;
-    void requestRedraw() {if (surface.get()) surface->requestRedraw();}
-    /// return column mouse is over
-    std::size_t columnOver(double x) const;
-    /// return row mouse is over
-    std::size_t rowOver(double y) const;
-    void copyHeaderRowToDimNames(std::size_t row);
-    std::string headerForCol(std::size_t col) const;
-    std::vector<std::vector<std::string>> parseLines() const;
+    std::vector<std::vector<std::string> > parseLines(size_t maxColumn=std::numeric_limits<size_t>::max());
+    /// populate all column names from the headers row
+    void populateHeaders();
+    /// populate the name of column \a col with the data from the header row
+    void populateHeader(size_t col);
+    /// try to classify axis,data,ignore columns based on read in data
+    void classifyColumns();
+    /// unique values in each column, ignoring initial header lines
+    /// could slightly underestimate the value, and is never less than
+    /// 1, even for empty columns
+    std::vector<size_t> correctedUniqueValues();
+    /// import names CSV files using spec above
+    virtual void importFromCSV(const std::vector<std::string>& filenames)=0;
   };
+
+  bool isNumerical(const std::string& s);
 }
 
 #include "CSVDialog.cd"
+#include "CSVDialog.xcd"
 #endif

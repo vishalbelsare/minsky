@@ -17,8 +17,8 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "equations.h"
 #include "minsky.h"
+#include "equations.h"
 #include "userFunction.h"
 #include "minsky_epilogue.h"
 using namespace minsky;
@@ -46,8 +46,8 @@ namespace MathDAG
   {
     if (init.empty()) return "0";
     VariableValue v;
-    v.init=init;
-    auto t=v.initValue(cminsky().variableValues);
+    v.init(init);
+    auto t=cminsky().variableValues.initValue(v);
     string r;
     switch (t.rank())
       {
@@ -317,6 +317,140 @@ namespace MathDAG
     return o;
   }
 
+  // note strictly speaking, corr and corrcoef in Matlab only match
+  // the Minsky definitions for vectors. In Matlab, an NxM and NxL
+  // matrix produces a MxL output. In Minsky, the two arguments must
+  // be conformant.
+  template <>
+  ostream& OperationDAG<OperationType::covariance>::matlab(ostream& o) const
+  {
+    if (!arguments.empty() && !arguments[0].empty() && arguments[0][0] &&
+        arguments.size()>1 && !arguments[1].empty() && arguments[1][0])
+      return o<<"cov("<<arguments[0][0]->matlab()<<"," <<
+            arguments[1][0]->matlab()<<")";
+    return o<<"0";
+  }
+
+  template <>
+  ostream& OperationDAG<OperationType::correlation>::matlab(ostream& o) const
+  {
+    if (!arguments.empty() && !arguments[0].empty() && arguments[0][0] &&
+        arguments.size()>1 && !arguments[1].empty() && arguments[1][0])
+      return o<<"corr("<<arguments[0][0]->matlab()<<"," <<
+        arguments[1][0]->matlab()<<")";
+    return o<<"0";
+  }
+
+  template <>
+  ostream& OperationDAG<OperationType::linearRegression>::matlab(ostream& o) const
+  {
+    if (!arguments.empty() && !arguments[0].empty() && arguments[0][0] &&
+        arguments.size()>1 && !arguments[1].empty() && arguments[1][0])
+      return o<<"linReg("<<arguments[0][0]->matlab()<<"," <<
+        arguments[1][0]->matlab()<<")";
+    return o<<"0";
+  }
+
+  template <>
+  ostream& OperationDAG<OperationType::bulkLinearRegression>::matlab(ostream& o) const
+  {
+    if (!arguments.empty() && !arguments[0].empty() && arguments[0][0] &&
+        arguments.size()>1 && !arguments[1].empty() && arguments[1][0])
+      return o<<"bLinReg("<<arguments[0][0]->matlab()<<"," <<
+        arguments[1][0]->matlab()<<")";
+    return o<<"0";
+  }
+
+  template <>
+  ostream& OperationDAG<OperationType::size>::matlab(ostream& o) const
+  {
+    if (!arguments.empty() && !arguments[0].empty() && arguments[0][0])
+      {
+        size_t dim=numeric_limits<size_t>::max();
+        if (auto op=dynamic_cast<OperationBase*>(state.get()))
+          if (auto vv=arguments[0][0]->result)
+            {
+              for (auto& i: vv->hypercube().xvectors)
+                if (i.name==op->axis)
+                  {
+                    dim=&i-&vv->hypercube().xvectors.front();
+                    break;
+                  }
+              if (dim<vv->rank())
+                return o<<"size("<<arguments[0][0]->matlab()<<","<<dim<<")";
+            }
+        return o<<"prod(size("<<arguments[0][0]->matlab()<<"))";
+      }
+    return o<<"0";
+  }
+
+  template <>
+  ostream& OperationDAG<OperationType::shape>::matlab(ostream& o) const
+  {
+    if (!arguments.empty() && !arguments[0].empty() && arguments[0][0])
+      {
+        return o<<"size("<<arguments[0][0]->matlab()<<")";
+      }
+    return o<<"0";
+  }
+
+  template <>
+  ostream& OperationDAG<OperationType::mean>::matlab(ostream& o) const
+  {
+    if (!arguments.empty() && !arguments[0].empty() && arguments[0][0])
+      {
+        return o<<"mean("<<arguments[0][0]->matlab()<<")";
+      }
+    return o<<"0";
+  }
+
+  template <>
+  ostream& OperationDAG<OperationType::median>::matlab(ostream& o) const
+  {
+    if (!arguments.empty() && !arguments[0].empty() && arguments[0][0])
+      {
+        return o<<"median("<<arguments[0][0]->matlab()<<")";
+      }
+    return o<<"0";
+  }
+
+  template <>
+  ostream& OperationDAG<OperationType::stdDev>::matlab(ostream& o) const
+  {
+    if (!arguments.empty() && !arguments[0].empty() && arguments[0][0])
+      {
+        return o<<"std("<<arguments[0][0]->matlab()<<")";
+      }
+    return o<<"0";
+  }
+
+  template <>
+  ostream& OperationDAG<OperationType::moment>::matlab(ostream& o) const
+  {
+    if (!arguments.empty() && !arguments[0].empty() && arguments[0][0])
+      {
+        double exponent=1;
+        if (auto op=dynamic_cast<OperationBase*>(state.get()))
+          exponent=op->arg;
+        return o<<"moment("<<arguments[0][0]->matlab()<<","<<exponent<<")";
+      }
+    return o<<"0";
+  }
+
+  // note - matlab doesn't have a histogram function by default
+  template <>
+  ostream& OperationDAG<OperationType::histogram>::matlab(ostream& o) const
+  {
+    if (!arguments.empty() && !arguments[0].empty() && arguments[0][0])
+      {
+        size_t nBins=1;
+        if (auto op=dynamic_cast<OperationBase*>(state.get()))
+          nBins=op->arg;
+        return o<<"histogram("<<arguments[0][0]->matlab()<<","<<nBins<<")";
+      }
+    return o<<"0";
+  }
+
   template <>
   ostream& OperationDAG<OperationType::time>::matlab(ostream& o) const
   {
@@ -386,14 +520,14 @@ namespace MathDAG
   template <>
   ostream& OperationDAG<OperationType::data>::matlab(ostream& o) const
   {
-    throw error("data blocks not yet supported in Matlab mode");
+    throw error("Data blocks are not yet supported in Matlab mode");
     return o;
   }
         
   template <>
   ostream& OperationDAG<OperationType::ravel>::matlab(ostream& o) const
   {
-    throw error("data blocks not yet supported in Matlab mode");
+    throw error("Ravels are not yet supported in Matlab mode");
     return o;
   }
         
@@ -589,6 +723,13 @@ namespace MathDAG
     return o<<"cumsum("<<arguments[0][0]->matlab()<<")";
   }
   template <>
+  ostream& OperationDAG<OperationType::runningAv>::matlab(ostream& o) const
+  {
+    checkArg(0,0);
+    return o<<"cumsum("<<arguments[0][0]->matlab()<<")./cumsum(ones(size("<<
+      arguments[0][0]->matlab()<<")))";
+  }
+  template <>
   ostream& OperationDAG<OperationType::runningProduct>::matlab(ostream& o) const
   {
     checkArg(0,0);
@@ -596,6 +737,13 @@ namespace MathDAG
   }
   template <>
   ostream& OperationDAG<OperationType::difference>::matlab(ostream& o) const
+  {
+    checkArg(0,0);
+    return o<<"diff("<<arguments[0][0]->matlab()<<")";
+  }
+  // nb - because Matlab is oblivious to x-vectors, there is no difference between Δ⁻ and Δ⁺
+  template <>
+  ostream& OperationDAG<OperationType::differencePlus>::matlab(ostream& o) const
   {
     checkArg(0,0);
     return o<<"diff("<<arguments[0][0]->matlab()<<")";
@@ -626,6 +774,28 @@ namespace MathDAG
   {
     checkArg(0,0);checkArg(1,0);
     return o<<"("<<arguments[0][0]->matlab()<<")("<<arguments[1][0]->matlab()<<")";
+  }
+  template <>
+  ostream& OperationDAG<OperationType::meld>::matlab(ostream& o) const
+  {
+    checkArg(0,0);checkArg(1,0);
+    return o<<"meld("<<arguments[0][0]->matlab()<<","<<arguments[1][0]->matlab()<<")";
+  }
+  template <>
+  ostream& OperationDAG<OperationType::merge>::matlab(ostream& o) const
+  {
+    checkArg(0,0);checkArg(1,0);
+    return o<<"meld("<<arguments[0][0]->matlab()<<","<<arguments[1][0]->matlab()<<")";
+  }
+  template <>
+  ostream& OperationDAG<OperationType::slice>::matlab(ostream& o) const
+  {
+    checkArg(0,0);checkArg(1,0);
+    double slice=0;
+    if (state)
+      if (auto o=state->operationCast())
+        slice=o->arg;
+    return o<<"slice("<<arguments[0][0]->matlab()<<","<<slice<<")";
   }
 
 }

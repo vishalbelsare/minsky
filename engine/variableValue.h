@@ -21,12 +21,13 @@
 #include "variableType.h"
 #include "tensorInterface.h"
 #include "tensorVal.h"
-#include "ecolab.h"
 #include "classdesc_access.h"
-#include "constMap.h"
 #include "str.h"
 #include "CSVDialog.h"
 #include "latexMarkup.h"
+#include "slider.h"
+#include "valueId.h"
+#include "variableSummary.h"
 #include <regex> 
 #include <utility>
 #include <boost/locale.hpp>
@@ -35,23 +36,51 @@ using namespace boost::locale::conv;
 namespace minsky
 {
   class VariableValue;
-  struct VariableValues;
+  class VariableValues;
   class Group;
   typedef std::shared_ptr<Group> GroupPtr;
   using namespace civita;
+
+  struct VariableValueData: public civita::ITensorVal, public Slider, public CSVDialog
+  {
+    using ITensorVal::operator=;
+    
+    /// when init is a tensor of values, this overrides the init string
+    TensorVal tensorInit;
+    /// when the RHS is attached to a tensor expression, this is a reference to it
+    TensorPtr rhs;
+    
+    /// dimension units of this value
+    Units units;
+    bool unitsCached=false; // optimisation to prevent evaluating this units value more than once
+    void setUnits(const std::string& x) {units=Units(x);}
+
+    /// long and short descriptions - common to all variables of a given name
+    std::string detailedText, tooltip;
+
+    bool godleyOverridden=false;
+    std::string name; // name of this variable
+    classdesc::Exclude<std::weak_ptr<Group>> m_scope;
+  };
   
-  class VariableValue: public VariableType, public civita::ITensorVal
+  class VariableValue: public VariableType, public VariableValueData
   {
     CLASSDESC_ACCESS(VariableValue);
   private:
     Type m_type;
-    int m_idx; /// index into value vector
+    int m_idx=-1; /// index into value vector
     double& valRef(); 
     const double& valRef() const;
-    std::vector<unsigned> m_dims;
     
     friend class VariableManager;
     friend struct SchemaHelper;
+
+    // values are always live
+    ITensor::Timestamp timestamp() const override {return Timestamp::clock::now();}
+
+  protected: // protected to allow creation of zero/one constants.
+    /// the initial value of this variable
+    std::string m_init;
   public:
     /// variable has an input port
     bool lhs() const {
@@ -61,46 +90,40 @@ namespace minsky
       return type()==tempFlow || type()==undefined;}
     /// returns true if variable's data is allocated on the flowVariables vector
     bool isFlowVar() const {
-      return m_type!=stock && m_type!=integral;
+      return m_type!=stock && m_type!=integral && m_type!=undefined;
     }
     bool isZero() const {
-      return m_type==constant && (init.empty() || init=="0");
+      return m_type==constant && (init().empty() || init()=="0");
     }
 
-    Type type() const {return m_type;}
-
-    /// the initial value of this variable
-    std::string init;
-    /// when init is a tensor of values, this overrides the init string
-    TensorVal tensorInit;
-
-    /// dimension units of this value
-    Units units;
-    bool unitsCached=false; // optimisation to prevent evaluating this units value more than once
-    void setUnits(const std::string& x) {units=Units(x);}
-
-    bool sliderVisible=false; // determined at reset time
-    bool godleyOverridden;
-    std::string name; // name of this variable
-    classdesc::Exclude<std::weak_ptr<Group>> m_scope;
+    VariableType::Type type() const {return m_type;}
 
     ///< value at the \a ith location of the vector/tensor. Default,
     ///(i=0) is right for scalar quantities
-    double value(std::size_t i=0) const {return operator[](i);}
+    // name valueAt to allow TCL exposure
+    double valueAt(size_t i) const {
+      if (i>=size())
+        throw std::runtime_error("Index out of range");
+      return operator[](i);
+    }
+    double value() const {return valueAt(0);}
+    ///< set the value at the \a ith location
+    double setValue(size_t i, double x) {
+      if (i>=size())
+        throw std::runtime_error("Index out of range");
+      return operator[](i)=x;
+    }
+    double setValue(double x) {return setValue(0,x);}
     int idx() const {return m_idx;}
     void reset_idx() {m_idx=-1;}    
 
-    // values are always live
-    Timestamp timestamp() const override {return Timestamp::clock::now();}
-    
     double operator[](std::size_t i) const override {return *(&valRef()+i);}
     double& operator[](std::size_t i) override;
 
     const Index& index(Index&& i) override {
-      assert(idx()==-1||idxInRange());
       std::size_t prevNumElems = size();
       m_index=i;
-      if (idx()==-1 || (prevNumElems<size()))    
+      if (idx()==-1 || !idxInRange() || (prevNumElems<size()))    
         allocValue();
       assert(idxInRange());
       return m_index;
@@ -118,122 +141,67 @@ namespace minsky
     }
 
     bool idxInRange() const;
-    
+
+    const Hypercube& hypercube() const override;
     const Hypercube& hypercube(const Hypercube& hc) override
     {hypercube_(hc); return m_hypercube;}
     const Hypercube& hypercube(Hypercube&& hc) override
     {hypercube_(hc); return m_hypercube;}
     using ITensorVal::hypercube;
                                                                            
-    VariableValue(Type type=VariableType::undefined, const std::string& name="", const std::string& init="", const GroupPtr& group=GroupPtr()): 
-      m_type(type), m_idx(-1), init(init), godleyOverridden(0), name(utf_to_utf<char>(name)), m_scope(scope(group,name)) {}
-
-    VariableValue(Type type, const VariableValue& vv):  VariableValue(vv) {
-      m_type=type;
-      m_idx=-1;
+    VariableValue(VariableType::Type type=VariableType::undefined, const std::string& name="", const GroupPtr& group=GroupPtr()): 
+      m_type(type)
+    {
+      this->name=utf_to_utf<char>(name);
+      m_scope=scope(group,name);
     }
+
+    VariableValue(VariableType::Type type, const VariableValue& vv):  VariableValueData(vv) {
+      m_type=type;
+      init(vv.init());
+    }
+
+    VariableValue(const VariableValue&)=delete;
+    void operator=(const VariableValue&)=delete;
     
     using ITensorVal::operator=;
     VariableValue& operator=(TensorVal const&);
-    VariableValue& operator=(const ITensor& x) override;
+    VariableValue& asg(const ITensor& x) override;
 
     /// allocate space in the variable vector. @returns reference to this
     VariableValue& allocValue();
 
-    std::string valueId() const {return valueIdFromScope(m_scope.lock(),name);}
+    std::string valueId() const {return valueIdFromScope(m_scope.lock(),canonicalName(name));}
 
-    /// for importing CSV files
-    CSVDialog csvDialog;
-    
-    /// evaluates the initial value, based on the set of variables
-    /// contained in \a VariableManager. \a visited is used to check
-    /// for circular definitions
-    TensorVal initValue
-    (const VariableValues&, std::set<std::string>& visited) const;
-    TensorVal initValue(const VariableValues& v) const {
-      std::set<std::string> visited;
-      return initValue(v, visited);
-    }
-    void reset(const VariableValues&); 
+    void importFromCSV(const std::vector<std::string>&) override;
 
-    /// check that name is a valid valueId (useful for assertions)
-    static bool isValueId(const std::string& name) {
-      static std::regex pattern("((constant)?\\d*:[^:\\ \f\n\r\t\v]+)");
-      return name.length()>1 && name.substr(name.length()-2)!=":_" &&
-        std::regex_match(utf_to_utf<char>(name), pattern);   // Leave curly braces in valueIds. For ticket 1165
-    }
+    /// export this to a CSV file. If \a comment is non-empty, it is written as the first line of the file. If tabular is false, there is one data point per line, if true, the the longest dimension is written as a series on the line.
+    void exportAsCSV(const std::string& filename, const std::string& comment="", bool tabular=false) const;
 
-    /// construct a valueId
-    static std::string valueId(int scope, std::string name) {
-      auto tmp=":"+utf_to_utf<char>(stripActive(trimWS(latexToPangoNonItalicised(uqName(name)))));
-      if (scope<0) return tmp;
-      else return std::to_string(scope)+tmp;
-    }
-    static std::string valueId(std::string name) {
-	  name=utf_to_utf<char>(name);	
-      return valueId(scope(name), name);
-    }
-    /// starting from reference group ref, applying scoping rules to determine the actual scope of \a name
-    /// If name prefixed by :, then search up group heirarchy for locally scoped var, otherwise return ref
-    static GroupPtr scope(GroupPtr scope, const std::string& a_name);
-    static std::string valueId(const GroupPtr& ref, const std::string& name) 
-    {return valueIdFromScope(scope(ref,utf_to_utf<char>(name)), utf_to_utf<char>(name));}
-    static std::string valueIdFromScope(const GroupPtr& scope, const std::string& name);
-    
-    /// extract scope from a qualified variable name
-    /// @throw if name is unqualified
-    static int scope(const std::string& name);
-    /// extract unqualified portion of name
-    static std::string uqName(const std::string& name);
+    Summary summary() const;
 
-    void exportAsCSV(const std::string& filename, const std::string& comment="") const;
+    const std::string& init() const {return m_init;}
+    const std::string& init(const std::string& x);
+
+    /// sets variable value (or init value)
+    void sliderSet(double x);
+    /// increment slider by \a step
+    void incrSlider(double step);
+
+    /// adjust slider bounds to encompass the current value
+    void adjustSliderBounds();
   };
 
   struct ValueVector
   {
     /// vector of variables that are integrated via Runge-Kutta. These
     /// variables label the columns of the Godley table
-    static std::vector<double> stockVars;
+    static std::vector<double,CIVITA_ALLOCATOR<double>> stockVars;
     /// variables defined as a simple function of the stock variables,
     /// also known as lhs variables. These variables appear in the body
     /// of the Godley table
-    static std::vector<double> flowVars;
+    static std::vector<double,CIVITA_ALLOCATOR<double>> flowVars;
   };
-
-  /// a shared_ptr that default constructs a default target
-  struct VariableValuePtr: public std::shared_ptr<VariableValue>
-  {
-    template <class... A>
-    VariableValuePtr(A... a): std::shared_ptr<VariableValue>(std::make_shared<VariableValue>(std::forward<A>(a)...)) {}
-  };
-  
-  struct VariableValues: public ConstMap<std::string, VariableValuePtr>
-  {
-    VariableValues() {clear();}
-    void clear() {
-      ConstMap<std::string, mapped_type>::clear();
-      // add special values for zero and one, used for the derivative
-      // operator in SystemOfEquations
-      emplace("constant:zero", VariableValuePtr(VariableType::constant,"constant:zero","0"));
-      emplace("constant:one", VariableValuePtr(VariableType::constant,"constant:one","1"));
-    }
-    /// generate a new valueId not otherwise in the system
-    std::string newName(const std::string& name) const;
-    void reset();
-    /// checks that all entry names are valid
-    bool validEntries() const;
-    void resetUnitsCache() {
-      for (auto& i: *this)
-        i.second->unitsCached=false;
-    }
-  };
-  
-  struct EngNotation {int sciExp, engExp;};
-  /// return formatted mantissa and exponent in engineering format
-  EngNotation engExp(double value);
-  std::string mantissa(double value, const EngNotation&,int digits=3);
-  std::string expMultiplier(int exp);
-
 
 }
 

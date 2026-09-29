@@ -1,21 +1,122 @@
-.SUFFIXES: .xcd $(SUFFIXES)
-
-# location of minsky executable when building mac-dist
-MAC_DIST_DIR=minsky.app/Contents/MacOS
+.SUFFIXES: .xcd .rcd .tcd .gch .gcd $(SUFFIXES)
 
 SF_WEB=hpcoder@web.sourceforge.net:/home/project-web/minsky/htdocs
 
-# location of TCL and TK libraries 
-TCL_PREFIX=$(shell grep TCL_PREFIX $(call search,lib*/tclConfig.sh) | cut -f2 -d\')
-TCL_VERSION=$(shell grep TCL_VERSION $(call search,lib*/tclConfig.sh) | cut -f2 -d\')
-TCL_LIB=$(dir $(shell find $(TCL_PREFIX) -name init.tcl -path "*/tcl$(TCL_VERSION)*" -print))
-TK_LIB=$(dir $(shell find $(TCL_PREFIX) -name tk.tcl -path "*/tk$(TCL_VERSION)*" -print))
+export DEBUG
+export GCC
+export AEGIS
+export MXE
+export OPENMP
+export OPT
 
 # root directory for ecolab include files and libraries
 ECOLAB_HOME=$(shell pwd)/ecolab
+export LD_LIBRARY_PATH:=$(ECOLAB_HOME)/lib:$(LD_LIBRARY_PATH):/usr/local/lib64
+
+ARCH=$(shell arch)
+HAVE_CLANG=$(shell if which clang++>/dev/null; then echo 1; fi)
+SHELL=bash
+
+ifeq ($(shell uname),Darwin)
+MAKEOVERRIDES+=MAC_OSX_TK=1 TK=
+# for some reason, Intel Macs always report the arch as i386, even when they're x86_64
+ifeq ($(ARCH),i386)
+ARCH=x86_64
+endif
+endif
+
+ifdef MXE
+MAKEOVERRIDES+=MXE_PREFIX=x86_64-w64-mingw32.shared
+endif
+
+MAKEOVERRIDES+=DEBUG=$(DEBUG)
+
+ifdef MXE
+CPLUSPLUSOVERRIDE=
+else
+ifdef GCC
+COMPILER=g++
+else
+# default to clang if present
+ifeq ($(HAVE_CLANG),1)
+COMPILER=clang++ -std=c++20
+$(warning clang selected)
+else
+COMPILER=g++
+endif
+LINK=$(COMPILER)
+endif
+export COMPILER
+export CPLUSPLUS=$(COMPILER)
+CPLUSPLUSOVERRIDE=CPLUSPLUS="$(COMPILER)"
+endif
+
+ifneq ($(MAKECMDGOALS),clean)
+# make sure EcoLab is built first, even before starting to include Makefiles
+# disable AEGIS build here, as EcoLab 6 is still a little raw
+build_ecolab:=$(shell cd ecolab; if $(MAKE) $(MAKEOVERRIDES) $(CPLUSPLUSOVERRIDE) AEGIS= $(JOBS) only-libs >build.log 2>&1; then echo "ecolab built"; fi)
+
+#$(warning $(build_ecolab))
+ifneq ($(build_ecolab),ecolab built)
+$(warning $(shell cat ecolab/build.log))
+$(error Making ecolab failed: check ecolab/build.log)
+endif
+include $(ECOLAB_HOME)/include/Makefile
+
+ifndef MXE
+# rewrite CPLUSPLUS after clobber in Makefile
+CPLUSPLUS=$(COMPILER)
+endif
+
+# link statically to ecolab (needed until all bugs in EcoLab 6 ironed out)
+LIBS:=$(subst -lecolab,$(ECOLAB_HOME)/lib/libecolab.a,$(LIBS)) 
+endif
+
+ifndef OBS
+RPATH=-Wl,-rpath=$(ECOLAB_HOME)/lib
+endif
 
 ifeq ($(OS),Darwin)
-MAKEOVERRIDES+=MAC_OSX_TK=1
+# location of minsky executable when building mac-dist
+MAC_DIST_DIR=minsky.app/Contents/MacOS
+# default min version is the machine doing the building.
+MACOSX_MIN_VERSION=$(shell sw_vers|grep ProductVersion|tr -s '\t'|cut -f2)
+LIBS+=-framework AppKit
+FLAGS+=-std=c++20
+# add in MacPorts prefix, in case Node is installed through MacPorts
+DIRS+=/opt/local
+endif
+
+export GCOV
+export CLASSDESC=$(shell pwd)/ecolab/classdesc/classdesc
+MAKEOVERRIDES+=FPIC=1 CLASSDESC=$(CLASSDESC)
+ifneq ($(MAKECMDGOALS),clean)
+
+# RavelCAPI
+build_ravelcapi:=$(shell cd RavelCAPI; if  $(MAKE) $(JOBS) $(MAKEOVERRIDES) >build.log 2>&1; then echo "ravelcapi built"; fi) 
+$(warning $(build_ravelcapi))
+ifneq ($(strip $(build_ravelcapi)),ravelcapi built)
+$(error Making RavelCAPI failed: check RavelCAPI/build.log)
+endif
+
+ifndef MXE
+# libclipboard
+build_libclipboard:=$(shell cd libclipboard; if cmake -DBUILD_SHARED_LIBS=0 -DCMAKE_C_FLAGS=-fPIC . &>build.log && $(MAKE) $(JOBS) >>build.log 2>&1; then echo "libclipboard built"; fi) 
+$(warning $(build_libclipboard))
+ifneq ($(strip $(build_libclipboard)),libclipboard built)
+$(error Making libclipboard failed: check libclipboard/build.log)
+endif
+endif
+
+endif
+
+ifdef FLTO
+# for some distros with older clang compilers. Passing this through
+CPLUSPLUS+=-flto
+endif
+
+ifdef CLANG_STDCPP
+CXXFLAGS=-stdlib=libc++
 endif
 
 ifdef DISTCC
@@ -28,55 +129,51 @@ JOBS=-j 4
 endif
 
 ifneq ($(MAKECMDGOALS),clean)
-# make sure EcoLab is built first, even before starting to include Makefiles
-build_ecolab:=$(shell cd ecolab; if $(MAKE) $(MAKEOVERRIDES) $(JOBS) all-without-models >build.log 2>&1; then echo "ecolab built"; fi)
-$(warning $(build_ecolab))
-ifneq ($(build_ecolab),ecolab built)
-$(error "Making ecolab failed: check ecolab/build.log")
-endif
-include $(ECOLAB_HOME)/include/Makefile
-build_RavelCAPI:=$(shell cd RavelCAPI && $(MAKE) $(JOBS) $(MAKEOVERRIDES)))
-$(warning $(build_RavelCAPI))
-endif
+  HAVE_NODE=$(shell if which node >/dev/null 2>&1; then echo 1; fi)
+  $(warning have node=$(HAVE_NODE))
+  ifeq ($(HAVE_NODE),1)
+    NODE_API=
+    nsearch=$(firstword $(foreach dir,$(DIRS) /usr,$(wildcard $(dir)/$(1))))
+    ifeq ($(OS),Darwin)
+      NODE_HEADER=$(call nsearch,include/node)
+    else
+      ifdef MXE
+        NODE_API+=node-api.o
+      endif
+      ifeq ($(OS),CYGWIN)
+        NODE_API+=node-api.o
+      endif
+      NODE_VERSION=$(shell node -v|sed -E -e 's/[^0-9]*([0-9]*).*/\1/')
+      NODE_HEADER=$(call nsearch,include/node$(NODE_VERSION))
+      ifeq ($(NODE_HEADER),) # Ubuntu stashes node headers at /usr/include/nodejs, also if node version doesn't match, create a link in your include search path (eg ~/usr/include/node
+        NODE_HEADER=$(call nsearch,include/node)
+      endif
+    endif
+    # if we haven't found an installed version of the Node SDK, then
+    # check if it has been copied into node-addon-api, as is done with
+    # release tarballs
+    ifeq ($(NODE_HEADER),)
+      ifeq ($(words $(wildcard  node_modules/node-addon-api/node_api.h)),0)
+        $(error Can't find node header files')
+      endif
+    else
+      NODE_FLAGS+=-I$(NODE_HEADER)
+    endif
+    FLAGS+=-fno-omit-frame-pointer
+    NODE_FLAGS+=-Inode_modules/node-addon-api
+    NODE_FLAGS+='-DV8_DEPRECATION_WARNINGS' '-DV8_IMMINENT_DEPRECATION_WARNINGS'
+    NODE_FLAGS+='-D__STDC_FORMAT_MACROS' '-DNAPI_CPP_EXCEPTIONS'
 
-JSON_SPIRIT_HEADER=$(call search,include/json_spirit)
-ifneq ($(JSON_SPIRIT_HEADER),)
-  FLAGS+=-I$(JSON_SPIRIT_HEADER)
-endif
-FLAGS+=-DJSON_SPIRIT_MVALUE_ENABLED
+    $(warning node flags=$(NODE_FLAGS))
 
-HAVE_NODE=$(shell if which node>&/dev/null; then echo 1; fi)
-$(warning have node=$(HAVE_NODE))
-ifeq ($(HAVE_NODE),1)
-  NODE_API=
-ifeq ($(OS),Darwin)
-  NODE_HEADER=/usr/local/include/node
-else
-  NODE_VERSION=$(shell node -v|sed -E -e 's/[^0-9]*([0-9]*).*/\1/')
-ifdef MXE
-  NODE_HEADER=/usr/include/node$(NODE_VERSION)
-  NODE_API+=node-api.o
-else
-  NODE_HEADER=$(call search,include/node$(NODE_VERSION))
-endif
-endif
-  HAVE_NAPI=$(words $(NODE_HEADER))
-  FLAGS+=-fno-omit-frame-pointer
-  NODE_FLAGS=-I$(NODE_HEADER) -Inode_modules/node-addon-api
-  NODE_FLAGS+='-DV8_DEPRECATION_WARNINGS' '-DV8_IMMINENT_DEPRECATION_WARNINGS'
-  NODE_FLAGS+='-D__STDC_FORMAT_MACROS' '-DNAPI_CPP_EXCEPTIONS'
+    FLAGS+=$(NODE_FLAGS) 
+    # ensure node-addon-api installed
+    ifeq ($(words $(wildcard node_modules/node-addon-api)),0)
+      npm_install:=$(shell npm install)
+    endif
 
-  $(warning node flags=$(NODE_FLAGS))
-
-  FLAGS+=$(NODE_FLAGS) 
-  $(warning $(NODE_FLAGS))
-# ensure node-addon-api installed
-  ifeq ($(words $(wildcard node_modules/node-addon-api)),0)
-     npm_install:=$(shell npm install)
   endif
-
 endif
-
 
 # override the install prefix here
 PREFIX=/usr/local
@@ -85,33 +182,111 @@ PREFIX=/usr/local
 # custom one that picks up its scripts from a relative library
 # directory
 MODLINK=$(LIBMODS:%=$(ECOLAB_HOME)/lib/%)
-MODEL_OBJS=wire.o item.o group.o minsky.o port.o operation.o variable.o switchIcon.o grid.o godleyTable.o cairoItems.o godleyIcon.o lock.o SVGItem.o plotWidget.o canvas.o panopticon.o godleyTableWindow.o ravelWrap.o sheet.o CSVDialog.o selection.o itemTab.o plotTab.o godleyTab.o variableInstanceList.o autoLayout.o userFunction.o userFunction_units.o parameterTab.o
-ENGINE_OBJS=coverage.o derivative.o equationDisplay.o equations.o evalGodley.o evalOp.o flowCoef.o \
-	godleyExport.o latexMarkup.o variableValue.o node_latex.o node_matlab.o CSVParser.o \
+MODEL_OBJS=autoLayout.o cairoItems.o canvas.o CSVDialog.o dataOp.o equationDisplay.o godleyIcon.o godleyTable.o godleyTableWindow.o grid.o group.o item.o intOp.o lasso.o lock.o minsky.o operation.o operationRS.o operationRS1.o  operationRS2.o phillipsDiagram.o plotWidget.o port.o pubTab.o ravelWrap.o renderNativeWindow.o selection.o sheet.o SVGItem.o switchIcon.o userFunction.o userFunction_units.o variableInstanceList.o variable.o variablePane.o windowInformation.o wire.o 
+ENGINE_OBJS=clipboard.o cairoShimCairo.o databaseIngestor.o derivative.o equationDisplayRender.o equations.o evalGodley.o evalOp.o flowCoef.o \
+	godleyExport.o latexMarkup.o valueId.o variableValue.o node_latex.o node_matlab.o CSVParser.o \
 	minskyTensorOps.o mdlReader.o saver.o rungeKutta.o
-TENSOR_OBJS=hypercube.o tensorOp.o xvector.o index.o interpolateHypercube.o
 SCHEMA_OBJS=schema3.o schema2.o schema1.o schema0.o schemaHelper.o variableType.o \
 	operationType.o a85.o
 
-GUI_TK_OBJS=tclmain.o minskyTCL.o
-RESTSERVICE_OBJS=RESTService.o
+ifeq ($(CPLUSPLUS),g++)
+PRECOMPILED_HEADERS=model/minsky.gch
+endif
 
-ALL_OBJS=$(MODEL_OBJS) $(ENGINE_OBJS) $(SCHEMA_OBJS) $(GUI_TK_OBJS) $(TENSOR_OBJS)
+RESTSERVICE_OBJS=minskyRS.o RESTMinsky.o
 
 ifeq ($(OS),Darwin)
 FLAGS+=-DENABLE_DARWIN_EVENTS -DMAC_OSX_TK
 LIBS+=-Wl,-framework -Wl,Security -Wl,-headerpad_max_install_names
+MODEL_OBJS+=getContext.o
 endif
 
-FLAGS+=-std=c++14 -Ischema -Iengine -Itensor -Imodel -Icertify/include -IRESTService -IRavelCAPI $(OPT) -UECOLAB_LIB -DECOLAB_LIB=\"library\" -Wno-unused-local-typedefs
+ALL_OBJS=$(MODEL_OBJS) $(ENGINE_OBJS) $(SCHEMA_OBJS) $(RESTSERVICE_OBJS) RESTService.o addon.o typescriptAPI.o pyminsky.o createLinkGroupIcons.o
 
-VPATH= schema model engine tensor gui-tk RESTService RavelCAPI $(ECOLAB_HOME)/include 
+
+EXES=RESTService/minsky-RESTService$(EXE)
+ifeq ($(HAVE_NODE),1)
+EXES+=gui-js/build/minskyRESTService.node
+endif
+ifndef MXE
+EXES+=RESTService/typescriptAPI
+endif
+
+
+DYLIBS=libminsky.$(DL) libminskyEngine.$(DL) libcivita.$(DL) 
+MINSKYLIBS=-lminsky -lminskyEngine -lcivita
+
+
+ifndef NOWERROR
+ifndef MXE
+FLAGS+=-Werror
+endif
+endif
+
+# undef this, or redefine on command line
+CLASSDESC_ARITIES=0xf
+ifdef CLASSDESC_ARITIES
+FLAGS+=-DUSE_UNROLLED -DCLASSDESC_ARITIES=$(CLASSDESC_ARITIES)
+endif
+
+FLAGS+=-UTR1 -Ischema -Iengine -Imodel -Icertify/include -IRESTService -IRavelCAPI/civita -IRavelCAPI -Ilibclipboard/include -DCLASSDESC $(OPT) -UECOLAB_LIB -DECOLAB_LIB=\"library\" -DJSON_PACK_NO_FALL_THROUGH_TO_STREAMING -Wno-unused-local-typedefs -Wno-pragmas -Wno-unused-command-line-argument -Wno-unknown-warning-option -Wno-attributes -DCIVITA_ALLOCATOR=civita::LibCAllocator
+
+ifdef OBS
+# Fedora environments make duplicated macros a fatal error, and then
+# have conflicted macrso defined in the python headers vs system
+# headers :P
+FLAGS+=-Wno-macro-redefined
+# Some boost installations require linking to boost_system/thread, others don't have the library installed
+# -Wl,--no-as-needed suggested to solve Fedora linkage problems
+LIBS+=-Wl,--no-as-needed $(if $(call search,lib*/libboost_thread.so),-lboost_thread$(BOOST_EXT))
+LIBS+=$(if $(call search,lib*/libboost_system.so),-lboost_system$(BOOST_EXT)) -Wl,--as-needed
+endif
+
+ifeq ($(CPLUSPLUS),clang++)
+# note some of these flags are disabling warnings that are invalid in some circumstances
+FLAGS+=-std=c++20 -Wno-unused-command-line-argument -Wno-unknown-warning-option -Wno-defaulted-function-deleted -Wno-uninitialized
+endif
+
+# enable OPENMP by default
+ifdef OPENMP
+# Default compiler on MacOSX does not support OpenMP. Sigh!
+ifneq ($(OS),Darwin)
+FLAGS+=-fopenmp
+LIBS+=-fopenmp
+endif
+endif
+
+ifeq ($(DEBUG), 1)
+FLAGS+=-Wp,-D_GLIBCXX_ASSERTIONS
+endif
+
+VPATH= schema model engine RESTService RavelCAPI/civita RavelCAPI $(ECOLAB_HOME)/include $(ECOLAB_HOME)/graphcode $(ECOLAB_HOME)/classdesc
+
+# Classdesc rules
+CDINC=-I $(CDINCLUDE) -I $(ECOLAB_HOME)/include -I RESTService
+.h.cd:
+	$(CLASSDESC) -typeName -nodef $(CDINC) -i $< pack unpack >$@
 
 .h.xcd:
 # xml_pack/unpack need to -typeName option, as well as including privates
-	$(CLASSDESC) -typeName -nodef -respect_private -I $(CDINCLUDE) \
-	-I $(ECOLAB_HOME)/include -I $(CERTIFY_HOME)/certify -I RESTService -i $< xml_pack xml_unpack xsd_generate \
-	json_pack json_unpack >$@
+	$(CLASSDESC) -typeName -nodef -respect_private $(CDINC) -i $< \
+	xml_pack xml_unpack xsd_generate json_pack json_unpack >$@
+
+.h.rcd:
+	$(CLASSDESC) -typeName -nodef -use_mbr_pointers -onbase -overload -respect_private \
+	 $(CDINC)  -i $< RESTProcess >$@
+
+.h.tcd:
+	$(CLASSDESC) -typeName -nodef -use_mbr_pointers -onbase -overload -respect_private \
+	$(CDINC)  -i $< typescriptAPI >$@
+
+.h.gch:
+	$(CPLUSPLUS) -c $(FLAGS) $(CXXFLAGS) $(OPT) -o $@ $<
+
+.h.gcd:
+	$(CPLUSPLUS) $(FLAGS)  $(CXXFLAGS) -MM -MG $< >$@
+	sed -i -e 's/.*\.o:/'$(*D)'\/'$(*F)'.gch:/' $@
+
 
 # assorted performance profiling stuff using gperftools, or Russell's custom
 # timer calipers
@@ -119,77 +294,115 @@ ifdef MEMPROFILE
 LIBS+=-ltcmalloc
 endif
 ifdef CPUPROFILE
+OPT+=-g
 LIBS+=-lprofiler
+endif
+ifdef TIMERS
+FLAGS+=-DTIMERS
 endif
 
 TESTS=
 ifdef AEGIS
-# ensure all exes get built in AEGIS mode
-TESTS=tests 
-# enable TCL coverage testing
-FLAGS+=-DTCL_COV -Werror=delete-non-virtual-dtor
+  # ensure all exes get built in AEGIS mode
+  TESTS=tests 
+  # -Wno-class-memaccess -Wno-stringop-overflow -Wno-restrict to silence bogus messages in g++
+  FLAGS+=-Werror=delete-non-virtual-dtor -Wno-unknown-pragmas -Wno-stringop-overflow  -Wno-stringop-overflow
+  CXXFLAGS+=-Wno-class-memaccess 
+endif
+
+ifdef ASAN
+FLAGS+=-fsanitize=address -fno-omit-frame-pointer -fno-optimize-sibling-calls -O1 -DRealloc=std::realloc
+LIBS+=-shared-libasan
 endif
 
 ifdef MXE
-BOOST_EXT=-mt-x64
 EXE=.exe
-FLAGS+=-Wa,-mbig-obj
+DL=dll
+FLAGS+=-DMXE -D_WIN32 -DUSE_UNROLLED -Wa,-mbig-obj
+CXXFLAGS+=-std=c++20
+PYMINSKY=gui-js/dynamic_libraries/pyminsky.pyd
+PYTHONCAPI=ecolab/classdesc/pythonCAPI.o # extra python.lib shims required on Windows
+# DLLS that need to be copied into the binary directory
+MXE_DLLS=libboost_thread-mt-x64 libbrotlidec libbrotlicommon libbz2 libcairo-2 \
+libcroco-0 libcrypto-3-x64 \
+libexpat-1 libffi libfontconfig-1 libfreetype-6 libfribidi-0 libgcc_s_seh-1 \
+libgdk_pixbuf-2 libgio-2 libglib-2 libgmodule-2 \
+libgobject-2 libgomp-1 libgsl-27 libgslcblas-0 libharfbuzz-0 libiconv-2 libintl-8 \
+libjpeg-9 liblzma-5 libpango-1 libpangocairo-1 libpangoft2-1 libpangowin32-1 \
+libpcre2-8-0 libpixman-1-0 libpng16-16 libreadline8 librsvg-2-2 libssl-3-x64 \
+libstdc++-6 libtermcap libwinpthread-1 libxml2-16 tcl86 zlib1 \
+libsoci libpq libsqlite
+BINDIR=$(subst bin,$(MXE_PREFIX)/bin,$(dir $(shell which $(CPLUSPLUS))))
+$(warning $(BINDIR))
+DLLS=$(notdir $(wildcard $(MXE_DLLS:%=$(BINDIR)/%*.dll)))
 else
 EXE=
-BOOST_EXT=
-# try to autonomously figure out which boost extension we should be using
-  ifeq ($(shell if $(CPLUSPLUS) test/testmain.cc $(LIBS) -lboost_system>&/dev/null; then echo 1; else echo 0; fi),0)
-    ifeq ($(shell if $(CPLUSPLUS) test/testmain.cc $(LIBS) -lboost_system-mt>&/dev/null; then echo 1; else echo 0; fi),1)
-      BOOST_EXT=-mt
-    else
-      $(warning cannot figure out boost extension) 
-    endif
-  endif
-$(warning Boost extension=$(BOOST_EXT))
+DL=so
+PYMINSKY=pyminsky.so
 endif
 
-EXES=gui-tk/minsky$(EXE)
-#RESTService/RESTService 
+ifeq ($(OS),CYGWIN)
+FLAGS+=-Wa,-mbig-obj -Wl,-x -Wl,--oformat,pe-bigobj-x86-64
+endif
 
-LIBS+=	-LRavelCAPI -lravelCAPI -ljson_spirit \
-	-lboost_system$(BOOST_EXT) -lboost_regex$(BOOST_EXT) \
-	-lboost_date_time$(BOOST_EXT) -lboost_program_options$(BOOST_EXT) \
-	-lboost_filesystem$(BOOST_EXT) -lboost_thread$(BOOST_EXT) -lgsl -lgslcblas -lssl -lcrypto
+LIBS:=-LRavelCAPI -lravelCAPI -LRavelCAPI/civita -lcivita  -lboost_date_time$(BOOST_EXT) -lgsl -lgslcblas -lssl -lcrypto $(LIBS)
 
 ifdef MXE
-LIBS+=-lcrypt32
-endif
+LIBS+=-lgdi32 -lcrypt32 -lbcrypt -lshcore
+else
+LIBS+=-Llibclipboard -lclipboard -lxcb -lX11 -ldl
 
-ifdef CPUPROFILE
-OPT+=-g
-LIBS+=-lprofiler
 endif
 
 # RSVG dependencies calculated here
 FLAGS+=$(shell $(PKG_CONFIG) --cflags librsvg-2.0)
 LIBS+=$(shell $(PKG_CONFIG) --libs librsvg-2.0)
 
+# Python dependencies here
+FLAGS+=$(shell $(PKG_CONFIG) --cflags python3)
+LIBS+=$(shell $(PKG_CONFIG) --libs python3)
+
 GUI_LIBS=
 # disable a deprecation warning that comes from Wt
 FLAGS+=-DBOOST_SIGNALS_NO_DEPRECATION_WARNING
 
+# add the python module build here
+EXES+=$(PYMINSKY)
+ifeq ($(OS),Linux)
+ifndef MXE
+EXES+=createLinkGroupIcons
+endif
+endif
+
 ifndef AEGIS
-# just build the Minsky executable
-default: gui-tk/minsky$(EXE)
+default: $(EXES) gui-js/libs/shared/src/lib/backend/minsky.ts
 	-$(CHMOD) a+x *.tcl *.sh *.pl
+ifeq ($(OS),Linux)
+ifdef MXE
+	sh mkWindowsDist.sh
+else
+ifndef OBS
+	cd gui-js; env NX_DAEMON=false npm run export:package:linux
+endif
+endif
+endif
+ifeq ($(OS),Darwin)
+	cd gui-js; env NX_DAEMON=false npm run export:package:mac
+endif
 endif
 
 #chmod command is to counteract AEGIS removing execute privelege from scripts
 all: $(EXES) $(TESTS) minsky.xsd 
-# only perform link checking if online
-# linkchecker not currently working! :(
-#ifndef TRAVIS
-#	if ping -c 1 www.google.com; then linkchecker -f linkcheckerrc gui-tk/library/help/minsky.html; fi
-#endif
 	-$(CHMOD) a+x *.tcl *.sh *.pl
 
+
+$(ALL_OBJS): $(PRECOMPILED_HEADERS)
+
+# this dependency is not worked out automatically because they're hidden by a #ifdef in minsky_epilogue.h
+$(MODEL_OBJS): plot.xcd signature.xcd
+
 ifneq ($(MAKECMDGOALS),clean)
-include $(ALL_OBJS:.o=.d)
+include $(ALL_OBJS:.o=.d) $(PRECOMPILED_HEADERS:.gch=.gcd)
 endif
 
 ifdef MXE
@@ -205,85 +418,144 @@ else
 # symbolic debugger available for this build
 OPT=-O0
 endif
-ifdef RAVEL
-GUI_TK_OBJS+=RavelLogo.o
-else
-GUI_TK_OBJS+=MinskyLogo.o
-endif
+#ifdef RAVEL
+#GUI_TK_OBJS+=RavelLogo.o
+#else
+#GUI_TK_OBJS+=MinskyLogo.o
+#endif
 WINDRES=$(MXE_PREFIX)-windres
 endif
 
-MinskyLogo.o: MinskyLogo.rc gui-tk/icons/MinskyLogo.ico
+MinskyLogo.o: MinskyLogo.rc icons/MinskyLogo.ico
 	$(WINDRES) -O coff -i $< -o $@
 
-RavelLogo.o: RavelLogo.rc gui-tk/icons/RavelLogo.ico
+RavelLogo.o: RavelLogo.rc icons/RavelLogo.ico
 	$(WINDRES) -O coff -i $< -o $@
 
-gui-tk/minsky$(EXE): $(GUI_TK_OBJS) $(MODEL_OBJS) $(ENGINE_OBJS) $(SCHEMA_OBJS) $(TENSOR_OBJS)
-	$(LINK) $(FLAGS) $^ $(MODLINK) -L/opt/local/lib/db48 -L. $(LIBS) $(GUI_LIBS) -o $@
-	-find . \( -name "*.cc" -o -name "*.h" \) -print |etags -
+getContext.o: getContext.cc
+	g++ -ObjC++ $(FLAGS) -I/opt/local/include -Iinclude -c $< -o $@
+
+RESTService/minsky-RESTService$(EXE): RESTService.o  $(RESTSERVICE_OBJS) $(MODEL_OBJS) $(SCHEMA_OBJS) $(ENGINE_OBJS)
+	$(LINK) $(FLAGS) $^ -L/opt/local/lib/db48 $(LIBS) -o $@
+
+RESTService/minsky-httpd$(EXE): httpd.o $(RESTSERVICE_OBJS) $(MODEL_OBJS) $(SCHEMA_OBJS) $(ENGINE_OBJS)
+	$(LINK) $(FLAGS) $^ -L/opt/local/lib/db48 $(LIBS) -o $@
+
+RESTService/typescriptAPI: typescriptAPI.o $(RESTSERVICE_OBJS) $(MODEL_OBJS) $(SCHEMA_OBJS) $(ENGINE_OBJS)
+	$(LINK) $(FLAGS) $^  $(LIBS) -o $@
+
+createLinkGroupIcons: createLinkGroupIcons.o
+	$(LINK) $(FLAGS) $^  $(LIBS) -o $@
+
+ifndef MXE
+gui-js/libs/shared/src/lib/backend/minsky.ts: RESTService/typescriptAPI
+	RESTService/typescriptAPI > $@
+endif
+
 ifdef MXE
-# make a local copy the TCL libraries
-	rm -rf gui-tk/library/{tcl,tk}
-	cp -r $(TCL_LIB) gui-tk/library/tcl
-	cp -r $(TK_LIB) gui-tk/library/tk
+DYNAMIC_LIB_DIR=gui-js/dynamic_libraries
+
+$(DYNAMIC_LIB_DIR)/%: $(BINDIR)/%
+	mkdir -p $(DYNAMIC_LIB_DIR)
+	cp $< $@
+# serialise this rule to rate limit connections to Sectigo timestamper
+	flock sign-lock sign.sh $@
+
+gui-js/build/minskyRESTService.node: $(DLLS:%=$(DYNAMIC_LIB_DIR)/%)
 endif
 
-RESTService/RESTService: $(RESTSERVICE_OBJS) $(MODEL_OBJS) $(ENGINE_OBJS) $(SCHEMA_OBJS)
-	$(LINK) $(FLAGS) $^ -L/opt/local/lib/db48 -L. $(LIBS) -o $@
+# N-API node embedded RESTService
+gui-js/build/minskyRESTService.node: addon.o  $(NODE_API) $(RESTSERVICE_OBJS) $(MODEL_OBJS) $(SCHEMA_OBJS) $(ENGINE_OBJS) RavelCAPI/libravelCAPI.a RavelCAPI/civita/libcivita.a 
+	mkdir -p gui-js/build
+ifdef MXE
+	$(LINK) -shared -o $@ $^ $(LIBS)
+else
+ifeq ($(OS),Darwin)
+	c++ -bundle -undefined dynamic_lookup -Wl,-no_pie -Wl,-search_paths_first -mmacosx-version-min=$(MACOSX_MIN_VERSION) -arch $(ARCH) -stdlib=libc++  -o $@  $^ $(LIBS)
+else
+	$(LINK) $(FLAGS) -shared -pthread -rdynamic -m64  -Wl,-soname=minskyRESTService.node -o $@ -Wl,--start-group $^ -Wl,--end-group $(RPATH) $(LIBS)
+endif
+endif
+ 
+libminsky.a: $(RESTSERVICE_OBJS) $(MODEL_OBJS) $(SCHEMA_OBJS) $(ENGINE_OBJS)
+	ar r $@ $^
 
-gui-tk/helpRefDb.tcl: $(wildcard doc/minsky/*.html)
-	rm -f $@
-	perl makeRefDb.pl doc/minsky/*.html >$@
-
-doc/minsky/labels.pl: $(wildcard doc/*.tex)
-	cd doc; sh makedoc.sh
-
-gui-tk/library/help: doc/minsky/labels.pl doc/minsky.html
-	rm -rf $@/*
-	mkdir -p $@/minsky
-	find doc/minsky \( -name "*.html" -o -name "*.css" -o -name "*.png" \) -exec cp {} $@/minsky \;
-	cp -r -f doc/minsky.html $@
-ifndef TRAVIS
-	linkchecker -f linkcheckerrc $@/minsky.html
+$(PYMINSKY): pyminsky.o $(PYTHONCAPI) libminsky.a ecolab/lib/libecolab.a
+ifeq ($(OS),Darwin)
+	c++ -bundle -undefined dynamic_lookup -Wl,-no_pie -Wl,-search_paths_first -mmacosx-version-min=$(MACOSX_MIN_VERSION) -arch $(ARCH) -stdlib=libc++  -o $@  $^ $(LIBS)
+	cp pyminsky.so gui-js/build/
+else
+  ifndef MXE
+	$(LINK) -shared $(FLAGS) -o $@ $^ libminsky.a $(RPATH) $(LIBS)
+  endif
 endif
 
-doc: gui-tk/library/help gui-tk/helpRefDb.tcl
+# used to find undefined symbols in pyminsky.so
+pyminsky-test: test/testmain.o pyminsky.o libminsky.a
+	$(LINK) $(FLAGS) -o $@ $^ $(LIBS) -lpthread -ltirpc
 
-$(EXES): RavelCAPI/libravelCAPI.a
+RESTService/dummy-addon.node: dummy-addon.o $(NODE_API)
+ifdef MXE
+	$(LINK) -shared -o $@ $^
+else
+	$(LINK) -shared -pthread -rdynamic -m64  -Wl,-soname=addon.node -o $@ -Wl,--start-group $^ -Wl,--end-group 
+endif
+
+addon.o: addon.cc
+	$(CPLUSPLUS) $(FLAGS) $(CXXFLAGS) $(OPT) -c -o $@ $<
+
+dummy-addon.o: dummy-addon.cc
+	$(CPLUSPLUS) $(NODE_FLAGS) $(FLAGS) $(CXXFLAGS) $(OPT) -c -o $@ $<
+
+node-api.o: node-api.cc
+	$(CPLUSPLUS) $(NODE_FLAGS) $(FLAGS) $(CXXFLAGS) $(OPT) -c -o $@ $<
+
+$(EXES):
 
 tests: $(EXES)
-	cd test; $(MAKE)
+	cd test; $(MAKE) $(MAKEOVERRIDES) CPLUSPLUS="$(CPLUSPLUS)"
 
-BASIC_CLEAN=rm -rf *.o *~ "\#*\#" core *.d *.cd *.xcd *.gcda *.gcno
+BASIC_CLEAN=rm -rf *.o *~ "\#*\#" core *.d *.cd *.rcd *.tcd *.xcd *.gcda *.gcno *.so *.dll *.dylib
 
 clean:
 	-$(BASIC_CLEAN) minsky.xsd
 	-rm -f $(EXES)
-	-cd test; $(MAKE)  clean
-	-cd gui-tk; $(BASIC_CLEAN)
-	-cd model; $(BASIC_CLEAN)
-	-cd engine; $(BASIC_CLEAN)
-	-cd schema; $(BASIC_CLEAN)
-	-cd ecolab; $(MAKE) clean
-	-cd RavelCAPI; $(MAKE) clean
+	-cd test && $(MAKE)  clean
+	-cd model && $(BASIC_CLEAN)
+	-cd engine && $(BASIC_CLEAN)
+	-cd schema && $(BASIC_CLEAN)
+	-cd ecolab && $(MAKE) clean
+	-cd RavelCAPI && $(MAKE) clean
+	-cd libclipboard && $(MAKE) clean && rm -f CMakeCache.txt
 
-mac-dist: gui-tk/minsky
+mac-dist:
+# force rebuild of the node file to force rewriting of dependent dylibs
+	rm -rf gui-js/build
+	$(MAKE) gui-js/build/minskyRESTService.node pyminsky.so
+	cp pyminsky.so gui-js/build
 # create executable in the app package directory. Make it 32 bit only
-	mkdir -p minsky.app/Contents/MacOS
-	sh -v mkMacDist.sh
+#	mkdir -p minsky.app/Contents/MacOS
+#	sh -v mkMacDist.sh
+	bash -v mkMacRESTService.sh
 
-minsky.xsd: gui-tk/minsky
-	gui-tk/minsky exportSchema.tcl 3
+minsky.xsd: pyminsky.so
+	python3 exportSchema.py 3
 
 upload-schema: minsky.xsd
 	scp minsky.xsd $(SF_WEB)
 
-install: gui-tk/minsky$(EXE)
-	mkdir -p $(PREFIX)/bin
-	cp gui-tk/minsky$(EXE) $(PREFIX)/bin
-	mkdir -p $(PREFIX)/lib/minsky
-	cp -r gui-tk/*.tcl gui-tk/accountingRules gui-tk/icons gui-tk/library $(PREFIX)/lib/minsky
+install: $(EXES)
+ifneq ($(GUI_TK),1)
+	mkdir -p $(PREFIX)/bin $(PREFIX)/lib/minsky/resources/node-addons
+	cp RESTService/minsky-RESTService $(PREFIX)/bin
+	cp RESTService/minsky-httpd $(PREFIX)/bin
+	cp gui-js/node-addons/*.node $(PREFIX)/lib/minsky/resources/node-addons
+ifeq ($(OS), "Linux")
+ifndef MXE
+	cp -r pyminsky.so $(PREFIX)/lib64
+endif
+endif
+endif
 
 
 
@@ -293,7 +565,6 @@ sure: all tests
 
 # produce doxygen annotated web pages
 doxydoc: $(wildcard *.h) $(wildcard *.cc) \
-	$(wildcard GUI/*.h) $(wildcard GUI/*.cc) \
 	$(wildcard engine/*.h) $(wildcard engine/*.cc) \
 	$(wildcard schema/*.h) $(wildcard schema/*.cc) Doxyfile
 	 doxygen
@@ -302,51 +573,60 @@ doxydoc: $(wildcard *.h) $(wildcard *.cc) \
 install-doxydoc: doxydoc
 	rsync -r -z --progress --delete doxydoc $(SF_WEB)
 
+
+doc/Ravel/labels.pl: $(wildcard doc/*.tex)
+	cd doc; sh makedoc.sh
+
 # upload manual to SF
-install-manual: doc/minsky/labels.pl
-	rsync -r -z --progress --delete doc/minsky.html doc/minsky $(SF_WEB)/manual
+install-manual: doc/Ravel/labels.pl
+	rsync -r -z --progress --delete doc/minsky.html doc/Ravel $(SF_WEB)/manual
 
-# run the regression suite checking for the TCL code coverage
-tcl-cov:
-	rm -f minsky.cov minsky.cov.{pag,dir} coverage.o
-	-env MINSKY_COV=`pwd`/minsky.cov $(MAKE) AEGIS=1 sure
-	cd test; $(MAKE) tcl-cov
-	sh test/run-tcl-cov.sh
+desktop-manual:
+	rsync -r --delete doc/minsky.html doc/Ravel gui-js/minsky-docs
 
-MINSKY_VERSION=$(shell git describe)
+# run this after every full release
+install-release: install-doxydoc install-manual upload-schema
 
 dist:
-	git archive --format=tar --prefix=Minsky-$(MINSKY_VERSION)/ HEAD -o /tmp/Minsky-$(MINSKY_VERSION).tar
-# add submodules
-	cd ecolab; git archive --format=tar --prefix=Minsky-$(MINSKY_VERSION)/ecolab/ HEAD -o /tmp/$$.tar
-	tar Af /tmp/Minsky-$(MINSKY_VERSION).tar /tmp/$$.tar
-	cd ecolab/classdesc; git archive --format=tar --prefix=Minsky-$(MINSKY_VERSION)/ecolab/classdesc/ HEAD -o /tmp/$$.tar
-	tar Af /tmp/Minsky-$(MINSKY_VERSION).tar /tmp/$$.tar
-	cd ecolab/graphcode; git archive --format=tar --prefix=Minsky-$(MINSKY_VERSION)/ecolab/graphcode/ HEAD -o /tmp/$$.tar
-	tar Af /tmp/Minsky-$(MINSKY_VERSION).tar /tmp/$$.tar
-	cd certify; git archive --format=tar --prefix=Minsky-$(MINSKY_VERSION)/certify/ HEAD -o /tmp/$$.tar
-	tar Af /tmp/Minsky-$(MINSKY_VERSION).tar /tmp/$$.tar
-	cd RavelCAPI; git archive --format=tar --prefix=Minsky-$(MINSKY_VERSION)/RavelCAPI/ HEAD -o /tmp/$$.tar
-	tar Af /tmp/Minsky-$(MINSKY_VERSION).tar /tmp/$$.tar
-	cd exprtk; git archive --format=tar --prefix=Minsky-$(MINSKY_VERSION)/exprtk/ HEAD -o /tmp/$$.tar
-	tar Af /tmp/Minsky-$(MINSKY_VERSION).tar /tmp/$$.tar
-	gzip -f /tmp/Minsky-$(MINSKY_VERSION).tar
+	sh makeDist.sh $(NODE_HEADER)
 
+js-dist:
+	sh makeJsDist.sh
+
+.PHONY: lcov
+lcov: export GCC=1
+lcov: export GCOV=1
+LCOV_FLAGS=--no-external --ignore-errors gcov,mismatch,wrap,version
 lcov:
 	$(MAKE) clean
-	-$(MAKE) GCOV=1 tests
-	lcov -i -c -d . --no-external -o lcovi.info
+	$(MAKE) tests
+#	lcov -i -c -d . $(LCOV_FLAGS) -o lcovi.info
 # ensure schema export code is exercised
-	-$(MAKE) GCOV=1 minsky.xsd
-	-$(MAKE) GCOV=1 sure
-	lcov -c -d .  --no-external -o lcovt.info
-	lcov -a lcovi.info -a lcovt.info -o lcov.info
-	lcov -r lcov.info */ecolab/* "*.cd" "*.xcd" -o lcovr.info 
-	genhtml -o coverage lcovr.info
+	-$(MAKE) minsky.xsd
+	-$(MAKE) sure
+	mkdir -p coverage
+	gcovr -r . --html --html-details -o coverage/index.html
+#	lcov -c -d .  $(LCOV_FLAGS) -o lcovt.info
+#	lcov -a lcovi.info -a lcovt.info -o lcov.info
+#	lcov -r lcov.info --ignore-errors unused */ecolab/* "*.cd" "*.xcd" "*.rcd" "*.tcd" -o lcovr.info 
+#	genhtml -o coverage lcovr.info
+
 
 compile_commands.json: Makefile
-	rm *.o
-	bear $(MAKE)
+	-rm *.o
+	bear -- $(MAKE)
 
+# Note - this doesn't work under the OneAPI development environment. 
 clang-tidy: compile_commands.json
 	run-clang-tidy
+
+compile-ts:
+	cd gui-js && npx tsc | sed -e 's/\x1b\[[0-9;]*m//g'|sed -e 's/(\([0-9]*\),[0-9]*)/:\1/g'
+
+codeql:
+	-rm *.o
+	codeql database create codeqlDb -l c++ -c "$(MAKE) $(MAKEFLAGS) gui-js/build/minskyRESTService.node" -j0  --overwrite
+	codeql database analyze codeqlDb codeql/cpp-queries:codeql-suites/cpp-security-and-quality.qls --format=csv --output=codeql-c++.csv -j0
+
+windows-package:
+	sh mkWindowsDist.sh

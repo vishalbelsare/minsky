@@ -1,0 +1,102 @@
+.table-wrapper {
+  height: calc(100vh - 100px);
+  width: 100vw;
+  overflow: auto;
+  
+  div.table {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
+
+    padding: 10px;
+
+    div.header-row > div.data-cell {
+      font-weight: bold;
+      border-bottom: 1px solid black;
+    }
+
+    div.table-row:nth-child(even) > div.data-cell {
+      background-color: #E9E9E9;
+    }
+
+    div.table-row {
+      display: flex;
+      flex-direction: row;
+      justify-content: flex-start;
+      align-items: stretch;
+
+      div.data-cell {
+        display: flex;
+        flex-direction: row;
+        justify-content: flex-start;
+        align-items: center;
+
+        flex: 2 0 100px;
+
+        text-align: left;
+
+        padding: 4px;
+
+        text-overflow: ellipsis;
+        overflow: hidden;
+      }
+
+      div.data-cell.wide {
+        flex: 3 0 150px;
+        justify-content: flex-center;
+        text-align: center;
+      }
+
+      div.data-cell.extra-wide {
+        flex: 6 0 200px;
+      }
+
+      div.data-cell.numeric {
+        justify-content: flex-end;
+      }
+
+      div.remove-cell {
+        padding: 2px 8px;
+
+        button {
+          width: 100%;
+          height: 100%;
+        }
+      }
+    }
+  }
+}
+
+/* Style the caret/arrow */
+.caret {
+  cursor: pointer;
+  user-select: none; /* Prevent text selection */
+}
+
+/* Create the caret/arrow with a unicode, and style it */
+.caret::before {
+  content: "\25B6";
+  color: black;
+  display: inline-block;
+  margin-right: 6px;
+}
+
+/* Rotate the caret/arrow icon when clicked on (using JavaScript) */
+.caret-down::before {
+  transform: rotate(90deg);
+}
+
+/* Hide the nested list */
+.nested {
+  display: none;
+}
+
+/* Show the nested list when the user clicks on the caret/arrow (with JavaScript) */
+.active {
+  display: block;
+}
+
+.one-indent {
+    margin: 10px
+}

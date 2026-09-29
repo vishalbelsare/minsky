@@ -1,67 +1,78 @@
 #! /bin/sh
 
 here=`pwd`
-if test $? -ne 0; then exit 2; fi
-tmp=/tmp/$$
-mkdir $tmp
-if test $? -ne 0; then exit 2; fi
-cd $tmp
-if test $? -ne 0; then exit 2; fi
+. $here/test/common-test.sh
 
-fail()
-{
-    echo "FAILED" 1>&2
-    cd $here
-    chmod -R u+w $tmp
-    rm -rf $tmp
-    exit 1
-}
+cat >input.py <<EOF
+from pyminsky import minsky
 
-pass()
-{
-    echo "PASSED" 1>&2
-    cd $here
-    chmod -R u+w $tmp
-    rm -rf $tmp
-    exit 0
-}
+minsky.defaultFont('Sans')
+minsky.setGodleyIconResource('$here/gui-js/apps/minsky-electron/src/assets/godley.svg')
+minsky.setGroupIconResource('$here/gui-js/apps/minsky-electron/src/assets/group.svg')
+minsky.setRavelIconResource('$here/gui-js/apps/minsky-electron/src/assets/ravel-logo.svg')
+minsky.setLockIconResource('$here/gui-js/apps/minsky-electron/src/assets/locked.svg','$here/gui-js/apps/minsky-electron/src/assets/unlocked.svg')
+minsky.histogramResource.setResource('$here/gui-js/apps/minsky-electron/src/assets/histogram.svg')
 
-trap "fail" 1 2 3 15
+minsky.load('$here/test/allItems.mky')
+minsky.multipleEquities(1)
+minsky.canvas.renderToSVG('allItemsBare.svg')
 
-cat >input.tcl <<EOF
-minsky.defaultFont Sans
-minsky.setGodleyIconResource $here/gui-tk/icons/bank.svg
-minsky.setGroupIconResource $here/gui-tk/icons/group.svg
-minsky.load $here/test/allItems.mky
-minsky.multipleEquities 1
-minsky.canvas.renderToSVG allItemsBare.svg
+for i in range(len(minsky.model.items)):
+    minsky.model.items[i].mouseFocus(True)
+    minsky.model.items[i].tooltip('tooltip')
 
-for {set i 0} {\$i<[minsky.model.items.size]} {incr i} {
-  minsky.model.items.@elem \$i
-  minsky.model.items(\$i).mouseFocus 1
-  minsky.model.items(\$i).tooltip tooltip
-}
-for {set i 0} {\$i<[minsky.model.groups.size]} {incr i} {
-  minsky.model.groups.@elem \$i
-  minsky.model.groups(\$i).mouseFocus 1
-  minsky.model.groups(\$i).tooltip tooltip
-}
-minsky.canvas.renderToSVG allItemsMouseOver.svg
+for i in range(len(minsky.model.groups)):
+    minsky.model.groups[i].mouseFocus(1)
+    minsky.model.groups[i].tooltip('tooltip')
 
-for {set i 0} {\$i<[minsky.model.items.size]} {incr i} {
-  minsky.model.items(\$i).mouseFocus 0
-  minsky.model.items(\$i).selected 1
-}
-for {set i 0} {\$i<[minsky.model.groups.size]} {incr i} {
-  minsky.model.groups(\$i).mouseFocus 0
-  minsky.model.groups(\$i).selected 1
-}
-minsky.canvas.renderToSVG allItemsSelected.svg
+minsky.canvas.renderToSVG('allItemsMouseOver.svg')
 
-tcl_exit
+for i in range(len(minsky.model.items)):
+  minsky.model.items[i].mouseFocus(False)
+  minsky.model.items[i].selected(True)
+
+for i in range(len(minsky.model.groups)):
+  minsky.model.groups[i].mouseFocus(False)
+  minsky.model.groups[i].selected(True)
+
+minsky.canvas.renderToSVG('allItemsSelected.svg')
+
+for i in range(len(minsky.model.items)):
+  minsky.model.items[i].selected(False)
+  minsky.model.items[i].onBorder(True)
+
+minsky.canvas.renderToSVG('allItemsOnBorder.svg')
+
+for i in range(len(minsky.model.items)):
+  if minsky.model.items[i].classType() =="Sheet":
+    minsky.model.items[i].showRowSlice("headAndTail")
+    minsky.model.items[i].updateBoundingBox()
+
+minsky.canvas.renderToSVG('allItemsHeadAndTail.svg')
+
+for i in range(len(minsky.model.items)):
+  if minsky.model.items[i].classType()=="Sheet":
+    minsky.model.items[i].showRowSlice("tail")           
+    minsky.model.items[i].updateBoundingBox()
+
+minsky.canvas.renderToSVG('allItemsTail.svg')
+
+for i in range(len(minsky.model.items)):
+  if minsky.model.items[i].classType() =="Sheet":
+    minsky.model.items[i].showColSlice("headAndTail")
+    minsky.model.items[i].updateBoundingBox()
+
+minsky.canvas.renderToSVG('allItemsColHeadAndTail.svg')
+
+for i in range(len(minsky.model.items)):
+  if minsky.model.items[i].classType()=="Sheet":
+    minsky.model.items[i].showColSlice("tail")           
+    minsky.model.items[i].updateBoundingBox()
+
+minsky.canvas.renderToSVG('allItemsColTail.svg')
 EOF
 
-$here/gui-tk/minsky input.tcl
+python3 input.py
 if [ $? -ne 0 ]; then fail; fi
 
 for i in *.svg; do

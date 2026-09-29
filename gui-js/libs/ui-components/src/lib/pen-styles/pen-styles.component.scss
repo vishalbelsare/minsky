@@ -1,0 +1,17 @@
+@use '../../../../shared/src/lib/theme/common-style' as *;
+
+button {
+  margin: $margin;
+}
+
+.width {
+  width: 3rem;
+}
+
+.palette {
+  margin-right: $margin;
+}
+
+select {
+  height: 1.25rem;
+}

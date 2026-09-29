@@ -1,0 +1,19 @@
+@use '../../../../../shared/src/lib/theme/common-style' as *;
+
+select {
+  width: 125px;
+}
+
+button {
+  margin: $margin;
+}
+
+.form-control {
+  label {
+    min-width: auto;
+  }
+
+  input {
+    width: 12rem;
+  }
+}

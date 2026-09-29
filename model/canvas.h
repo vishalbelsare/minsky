@@ -23,14 +23,16 @@
 #include "group.h"
 #include "godleyIcon.h"
 #include "operation.h"
+#include "plotOptions.h"
 #include "plotWidget.h"
 #include "selection.h"
 #include "switchIcon.h"
 #include "wire.h"
 #include "ravelWrap.h"
+#include "lasso.h"
 #include "lock.h"
 #include "sheet.h"
-#include <cairoSurfaceImage.h>
+#include "renderNativeWindow.h"
 
 #include <chrono>
 
@@ -47,13 +49,21 @@ namespace minsky
     NoAssign& operator=(const U& x) {T::operator=(x); return *this;}
   };
   
-  class Canvas: public ecolab::CairoSurface
+  class Canvas: public RenderNativeWindow
   {
     CLASSDESC_ACCESS(Canvas);
     void copyVars(const std::vector<VariablePtr>&);
     void reportDrawTime(double) override;
     void mouseDownCommon(float x, float y);
+    bool redraw(int x0, int y0, int width, int height) override;
+    void mouseMoveOnItem(float x, float y);
 
+    /// flag indicating that a redraw is requested, but not yet redrawn
+    bool m_redrawRequested=false;
+    
+    /// options to apply to a new plot widget
+    PlotOptions<> defaultPlotOptions;
+    
   public:
     typedef std::chrono::time_point<std::chrono::high_resolution_clock> Timestamp;
     struct Model: public GroupPtr
@@ -93,27 +103,44 @@ namespace minsky
     Model model;
     
     Selection selection;
-    // we don't want surface to be reassigned every time a new model is loaded.
-    //NoAssign<Exclude<ecolab::cairo::SurfacePtr>> surface;
     ItemPtr itemFocus; ///< item selected by clicking
     WirePtr wireFocus; ///< wire that mouse is hovering over
     int handleSelected; ///< selected handle for handle moves, -ve = invalid 
     Exclude<shared_ptr<Port>> fromPort; ///< from port when creating a new wire
     double termX,termY; ///< terminal of wire when extending
     float moveOffsX, moveOffsY;
+    bool rotatingItem=false; ///< set true when rotating an item
+    Exclude<Point> rotateOrigin; ///< starting mouse position when rotating
+    void rotateItem(float x, float y) {
+      rotateOrigin=Point(x,y);
+      rotatingItem=true;
+    }
     ClickType::Type clickType;
-    /// for drawing error indicators on the canvas
-    bool itemIndicator=false;
+    /// for drawing error indicator on the canvas
+    ItemPtr itemIndicator;
 
-    /// indicates if focusFollowsMouse mode or clickToFocus is being used
-    bool focusFollowsMouse=false;
-    
     /// lasso mode support
     struct LassoMode {enum type  {none, lasso, itemResize};};
     LassoMode::type lassoMode=LassoMode::none;
     LassoBox lasso{0,0,0,0};
 
     bool redrawAll=true; ///< if false, then only redraw graphs
+
+    void moveTo(float x, float y) override {
+      model->moveTo(x,y);
+      requestRedraw();
+    }
+
+    std::vector<float> position() const override {
+      return {model->x(), model->y()};
+    }
+
+    void zoom(double x, double y, double z) override {
+      model->zoom(x,y,z);
+      requestRedraw();
+    }
+
+    double zoomFactor() const override {return model->zoomFactor();}
     
     Canvas() {}
     Canvas(const GroupPtr& m): model(m) {}
@@ -121,27 +148,29 @@ namespace minsky
     ecolab::cairo::SurfacePtr& surface() {return ecolab::CairoSurface::surface;}
     
     /// event handling for the canvas
-    void mouseDown(float x, float y);
-    void controlMouseDown(float x, float y);
-    void mouseUp(float x, float y);
-    void mouseMove(float x, float y);
-    /// handle key press over current itemFocus,
-    /// @param keySym the X key sym code
-    /// @param utf8 utf8 encoded character
-    /// @param state modifer state 1=shift, 2=caps lock, 4=ctrl, 8=alt
-    /// @param x & y contain mouse coordinates
-    /// @return true if event handled
-    bool keyPress(int keySym, const std::string& utf8, int state, float x, float yn);
+    void mouseDown(float x, float y) override;
+    void controlMouseDown(float x, float y) override;
+    void mouseUp(float x, float y) override;
+    void mouseMove(float x, float y) override;
+    bool keyPress(const EventInterface::KeyPressArgs&) override;
     void displayDelayedTooltip(float x, float y);
     
     /// return closest visible port to (x,y). nullptr is nothing suitable
     std::shared_ptr<Port> closestInPort(float x, float y) const;
 
     /// select all items in a given region
-    void select(float x0, float y0, float x1, float y1) {
-      select(LassoBox(x0,y0,x1,y1));
-    }
     void select(const LassoBox&);
+
+    /// align items in selection using the current context item as the anchor.
+    /// No-op when there is no current item (for example, no right-clicked item);
+    /// callers should only expose/enable this action when an anchor item exists.
+    void alignSelection(Selection::Align align)
+    {
+      if (item)
+        selection.align(*item,align);
+    }
+    
+    int ravelsSelected() const; ///< number of ravels in selection
     
     /// sets itemFocus, and resets mouse offset for placement
     void setItemFocus(const ItemPtr& x) {
@@ -155,23 +184,28 @@ namespace minsky
     ItemPtr item;
     WirePtr wire;
     ItemPtr itemAt(float x, float y);
-    void getItemAt(float x, float y) {item=itemAt(x,y);}
-    void getWireAt(float x, float y);
+    bool getItemAt(float x, float y) override {return (item=itemAt(x,y)).get();}
+    bool getWireAt(float x, float y) override;
 
     double defaultRotation=0;
     void addOperation(OperationType::Type op) {
+      if (op==OperationType::numOps) return;
       setItemFocus(model->addItem(OperationBase::create(op)));
       itemFocus->rotation(defaultRotation);
     }
     void addVariable(const std::string& name, VariableType::Type type) {
+      if (type==VariableType::undefined || type==VariableType::numVarTypes) return;
       setItemFocus(model->addItem(VariablePtr(type,name)));
       itemFocus->rotation(defaultRotation);
     }
     void addNote(const std::string& text) {
       setItemFocus(model->addItem(new Item));
-      itemFocus->detailedText=text;
+      itemFocus->detailedText(text);
     }
-    void addPlot() {setItemFocus(model->addItem(new PlotWidget));}
+    void addPlot() {
+      setItemFocus(model->addItem(new PlotWidget));
+      defaultPlotOptions.applyPlotOptions(*itemFocus->plotWidgetCast());
+    }
     void addGodley() {setItemFocus(model->addItem(new GodleyIcon));}
     void addGroup() {setItemFocus(model->addItem(new Group));}
     void addSwitch() {setItemFocus(model->addItem(new SwitchIcon));}
@@ -187,14 +221,6 @@ namespace minsky
     void lockRavelsInSelection();
     void unlockRavelsInSelection();
     
-    /// hide or reveal the defining variables and attached items within a selection on the canvas
-    Items itemVector;
-    void pushDefiningVarsToTab();
-    void showDefiningVarsOnCanvas();    
-    
-    /// push all plots on the canvas to the plot tab
-    void showPlotsOnTab();    
-
     /// delete item referenced by item
     void deleteItem();
     /// delete wire referenced by wire
@@ -207,7 +233,7 @@ namespace minsky
     /// select all variables referring to same variableValue as item
     void selectAllVariables();
     /// rename all instances of variable as item to \a newName
-    void renameAllInstances(const std::string newName);
+    void renameAllInstances(const std::string& newName);
     /// rename variable as item to \a newName
     void renameItem(const std::string& newName);
 
@@ -217,6 +243,9 @@ namespace minsky
     /// create a copy of item, and leave it focused
     void copyItem();
 
+    /// zooms canvas to fit available window
+    void zoomToFit();
+    
     /// reinitialises canvas to the group located in item
     void openGroupInCanvas(const ItemPtr& item);
 
@@ -248,21 +277,46 @@ namespace minsky
     //    void indicateItem() {itemIndicator=true;}
 
     /// redraw whole model
-    bool redraw(int x0, int y0, int width, int height) override;
-    void redraw();
+    bool redraw();
     /// region to be updated
     LassoBox updateRegion{0,0,0,0};
     /// update region given by updateRegion
-    void redrawUpdateRegion();
+    bool redrawUpdateRegion();
 
+    struct ZoomCrop
+    {
+      double zoom=1, left=0, top=0, width=1000, height=1000;
+    };
+
+    /// Render to a PNG file \a filename, scaling the canvas temporarily by \a zoom, shifts it to \a left, \a top, and crops to \a width, \a height
+    void renderToPNGCropped(const std::string& filename, const ZoomCrop&);
+
+    
     /// adjust canvas so that -ve coordinates appear on canvas
     void recentre();
-    
+
+    /// flag indicating that a redraw is requested, but not yet redrawn
+    bool redrawRequested() const {return m_redrawRequested;}
     /// request a redraw on the screen
-    void requestRedraw() {if (surface().get()) surface()->requestRedraw();}
+    void requestRedraw() {m_redrawRequested=true; if (surface().get()) surface()->requestRedraw();}
+    bool hasScrollBars() const override {return true;}
+
+    void setDefaultPlotOptions() {
+      if (auto p=item->plotWidgetCast())
+        defaultPlotOptions=*p;
+    }
+
+    void applyDefaultPlotOptions();
+
+    void setItemFromItemFocus();
   };
 }
 
+namespace classdesc
+{
+  template <> struct is_smart_ptr<minsky::Canvas::Model>: public true_type {};
+}
+
 #include "canvas.cd"
-#include "canvas.xcd"
+
 #endif

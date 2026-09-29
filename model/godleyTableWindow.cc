@@ -17,12 +17,19 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "cairoItems.h"
+#include "minsky.h"
 #include "godleyTableWindow.h"
+#include "../engine/cairoShimCairo.h"
 #include "selection.h"
 #include "latexMarkup.h"
-#include "minsky.h"
 #include <pango.h>
+
+#include "assetClass.rcd"
+#include "godleyTableWindow.rcd"
+#include "godleyTableWindow.xcd"
 #include "minsky_epilogue.h"
+
 #include <boost/locale.hpp>
 
 using namespace std;
@@ -34,9 +41,6 @@ using namespace boost::locale::conv;
 #include <cairo/cairo-ps.h>
 #include <cairo/cairo-pdf.h>
 #include <cairo/cairo-svg.h>
-
-constexpr double GodleyTableEditor::pulldownHot,
-  GodleyTableEditor::columnButtonsOffset, GodleyTableEditor::minColumnWidth;
 
 namespace
 {
@@ -58,7 +62,7 @@ namespace
 
   void showAsset(Pango& pango, cairo_t* cairo, GodleyAssetClass::AssetClass assetClass)
   {
-    CairoSave cs(cairo);
+    const CairoSave cs(cairo);
     auto& colour=assetColour[assetClass];
     cairo_set_source_rgb(cairo,colour.r,colour.g,colour.b);
     pango.show();
@@ -71,7 +75,7 @@ namespace minsky
   template <>
   void ButtonWidget<ButtonWidgetEnums::row>::invoke(double x)
   {
-    int button=x/buttonSpacing;
+    const int button=x/buttonSpacing;
     switch (button)
       {
       case 0:
@@ -98,8 +102,8 @@ namespace minsky
   template <>
   void ButtonWidget<ButtonWidgetEnums::col>::invoke(double x)
   {
-    int button=x/buttonSpacing;
-    if (!cminsky().multipleEquities && godleyIcon.table.singleEquity()) {  // no column widgets on equity column in single equity column mode
+    const int button=x/buttonSpacing;
+    if (!cminsky().multipleEquities() && godleyIcon.table.singleEquity()) {  // no column widgets on equity column in single equity column mode
       if (pos!=last)
         switch (button)
          {
@@ -145,27 +149,33 @@ namespace minsky
     catch (...) {}      
   }
 
+  bool GodleyTableEditor::selectedCellInTable() const
+  {
+    return m_godleyIcon.table.cellInTable(selectedRow, selectedCol);
+  }
 
   void GodleyTableEditor::draw(cairo_t *cairo)
   {
-    if (!godleyIcon) return;
-    CairoSave cs(cairo);
+    const CairoSave cs(cairo);
     cairo_scale(cairo,zoomFactor,zoomFactor);
     Pango pango(cairo);
     pango.setMarkup("Flows ↓ / Stock Vars →");
     rowHeight=pango.height()+2;
-    double tableHeight=(godleyIcon->table.rows()-scrollRowStart+1)*rowHeight;
+    const double tableHeight=(m_godleyIcon.table.rows()-scrollRowStart+1)*rowHeight;
     double x=leftTableOffset;
     double lastAssetBoundary=x;
     auto assetClass=GodleyAssetClass::noAssetClass;
-    colLeftMargin.clear();
+    // only recalculate colmn widths when no cell is selected.
+    const bool resizeGrid=selectedCol<0 || selectedRow<0 || motionRow>=0 || motionCol>=0;
+    if (resizeGrid)
+      colLeftMargin.clear();
   
-    for (unsigned col=0; col<godleyIcon->table.cols(); ++col)
+    for (unsigned col=0; col<m_godleyIcon.table.cols(); ++col)
       {
         // omit stock columns less than scrollColStart
         if (col>0 && col<scrollColStart) continue;
         // vertical lines & asset type tag
-        if (assetClass!=godleyIcon->table._assetClass(col))
+        if (assetClass!=m_godleyIcon.table.assetClass(col))
           {
             if (assetClass!=GodleyAssetClass::noAssetClass)
               {
@@ -178,7 +188,7 @@ namespace minsky
               }
             lastAssetBoundary=x;
           
-            assetClass=godleyIcon->table._assetClass(col);
+            assetClass=m_godleyIcon.table.assetClass(col);
             cairo_move_to(cairo,x+3,topTableOffset);
             cairo_rel_line_to(cairo,0,tableHeight);
           }
@@ -189,11 +199,11 @@ namespace minsky
       
         if (drawButtons && col>0 && col<colWidgets.size())
           {
-            CairoSave cs(cairo);
+            const CairoSave cs(cairo);
             cairo_move_to(cairo, x, columnButtonsOffset);
-        	colWidgets[col].draw(cairo);   
+            colWidgets[col].draw(cairo);   
           }
-      
+
         if (col>1)
           {
             cairo_move_to(cairo,x-pulldownHot,topTableOffset);
@@ -203,35 +213,34 @@ namespace minsky
       
         double y=topTableOffset;
         double colWidth=minColumnWidth;
-        for (unsigned row=0; row<godleyIcon->table.rows(); ++row)
+        for (unsigned row=0; row<m_godleyIcon.table.rows(); ++row)
           {
             if (row>0 && row<scrollRowStart) continue;
 
-            if (drawButtons && col==0 && row>0 && col<rowWidgets.size())
+            if (drawButtons && col==0 && row>0 && row<rowWidgets.size())
               {
-                CairoSave cs(cairo);
+                const CairoSave cs(cairo);
                 cairo_move_to(cairo, 0, y);
                 rowWidgets[row].draw(cairo);
               }
             
-            CairoSave cs(cairo);
+            const CairoSave cs(cairo);
             if (row!=0 || col!=0)               
               {
-				// Make sure non-utf8 chars converted to utf8 as far as possible. for ticket 1166.  
-                string text=utf_to_utf<char>(godleyIcon->table.cell(row,col));
+                // Make sure non-utf8 chars converted to utf8 as far as possible. for ticket 1166.  
+                string text=utf_to_utf<char>(m_godleyIcon.table.cell(row,col));
                 if (!text.empty())
                   {
                     string value;
                     FlowCoef fc(text);
-                    if (displayValues && col!=0)  // Do not add value "= 0.0" to first column. For tickets 1064/1274
+                    if (m_godleyIcon.displayValues && col!=0)  // Do not add value "= 0.0" to first column. For tickets 1064/1274
                       try
                         {
                           auto vv=cminsky().variableValues
-                            [VariableValue::valueIdFromScope
-                             (godleyIcon->group.lock(),utf_to_utf<char>(fc.name))];
+                            [valueId(m_godleyIcon.group.lock(),utf_to_utf<char>(fc.name))];
                           if (vv->idx()>=0)
                             {
-                              double val=fc.coef*vv->value();
+                              const double val=fc.coef*vv->value();
                               auto ee=engExp(val);
                               if (ee.engExp==-3) ee.engExp=0;
                               value=" = "+mantissa(val,ee)+expMultiplier(ee.engExp);
@@ -246,13 +255,13 @@ namespace minsky
                             
                     // the active cell renders as bare LaTeX code for
                     // editing, all other cells rendered as LaTeX
-                    if ((int(row)!=selectedRow || int(col)!=selectedCol) && !godleyIcon->table.initialConditionRow(row))
+                    if ((int(row)!=selectedRow || int(col)!=selectedCol) && !m_godleyIcon.table.initialConditionRow(row))
                       {
                         if (row>0 && col>0)    
                           { // handle DR/CR mode and colouring of text
                             if (fc.coef<0)
                               cairo_set_source_rgb(cairo,1,0,0);
-                            if (displayStyle==GodleyTable::DRCR)
+                            if (cminsky().displayStyle==GodleyTable::DRCR)
                               {
                                 if (assetClass==GodleyAssetClass::asset ||
                                     assetClass==GodleyAssetClass::noAssetClass)
@@ -271,12 +280,11 @@ namespace minsky
                       }
                     else
                       //Display values of parameters used as initial conditions in Godley tables. for ticket 1126.  
-                      if (godleyIcon->table.initialConditionRow(row) && displayValues) text=defang(text+=value);
+                      if (m_godleyIcon.table.initialConditionRow(row) && m_godleyIcon.displayValues) text=defang(text+=value);
                       else text=defang(text);
                   }
                 pango.setMarkup(text);
               }
-            // allow extra space for the ▼ in row 0
             colWidth=max(colWidth,pango.width() + (row==0? pulldownHot:0));
             cairo_move_to(cairo,x+3,y);
             pango.show();
@@ -284,8 +292,13 @@ namespace minsky
           }
         colWidth+=5;
 
-        colLeftMargin.push_back(x);
-        x+=colWidth;
+        if (resizeGrid)
+          {
+            colLeftMargin.push_back(x);
+            x+=colWidth;
+          }
+        else if (col+1<colLeftMargin.size())
+          x=colLeftMargin[col+1];
       }
 
     // display pulldown for last column
@@ -293,7 +306,6 @@ namespace minsky
     pango.setMarkup("▼");
     pango.show();
 
-  
     pango.setMarkup
       (capitalise(enumKey<GodleyAssetClass::AssetClass>(assetClass)));
     // increase column by enough to fit asset class label
@@ -320,10 +332,10 @@ namespace minsky
     pango.show();
     double colWidth=pango.width();
   
-    for (unsigned row=0; row<godleyIcon->table.rows(); ++row)    // perform row sum on stock var heading column too. for ticket 1285
+    for (unsigned row=0; row<m_godleyIcon.table.rows(); ++row)    // perform row sum on stock var heading column too. for ticket 1285
       {
         if (row >0 && row<scrollRowStart) continue;                    
-        pango.setMarkup(latexToPango(godleyIcon->rowSum(row)));
+        pango.setMarkup(latexToPango(m_godleyIcon.rowSum(row)));
         colWidth=max(colWidth,pango.width());
         cairo_move_to(cairo,x,y);
         pango.show();
@@ -332,7 +344,7 @@ namespace minsky
 
     x+=colWidth;
     y=topTableOffset;
-    for (unsigned row=0; row<=godleyIcon->table.rows(); ++row)
+    for (unsigned row=0; row<=m_godleyIcon.table.rows(); ++row)
       {
         // horizontal lines
         if (row>0 && row<scrollRowStart) continue;
@@ -352,10 +364,10 @@ namespace minsky
 
     // indicate cell mouse is hovering over
     if ((hoverRow>0 || hoverCol>0) &&                                
-        size_t(hoverRow)<godleyIcon->table.rows() &&
-        size_t(hoverCol)<godleyIcon->table.cols())
+        size_t(hoverRow)<m_godleyIcon.table.rows() &&
+        size_t(hoverCol)<m_godleyIcon.table.cols())
       {
-        CairoSave cs(cairo);
+        const CairoSave cs(cairo);
         cairo_rectangle(cairo,
                         colLeftMargin[hoverCol],hoverRow*rowHeight+topTableOffset,
                         colLeftMargin[hoverCol+1]-colLeftMargin[hoverCol],rowHeight);
@@ -365,12 +377,11 @@ namespace minsky
           
     // indicate selected cells
     {
-      CairoSave cs(cairo);
-      if (selectedRow==0 || (selectedRow>=int(scrollRowStart) && selectedRow<int(godleyIcon->table.rows())))
+      const CairoSave cs(cairo);
+      if (selectedRow==0 || (selectedRow>=int(scrollRowStart) && selectedRow<int(m_godleyIcon.table.rows())))
         {
           size_t i=0, j=0;
           if (selectedRow>=int(scrollRowStart)) j=selectedRow-scrollRowStart+1;
-          double y=j*rowHeight+topTableOffset;
 
           if (motionCol>=0 && selectedRow==0 && selectedCol>0) // whole col being moved
             {
@@ -383,22 +394,27 @@ namespace minsky
               highlightRow(cairo,motionRow);
             }
           else if (selectedCol==0 || /* selecting individual cell */
-                   (selectedCol>=int(scrollColStart) && selectedCol<int(godleyIcon->table.cols())))   
+                   (selectedCol>=int(scrollColStart) && selectedCol<int(m_godleyIcon.table.cols())))   
             {
               if ((selectedRow>1 || selectedRow <0) || selectedCol!=0) // can't select flows/stockVars or Initial Conditions labels
                 {
                   if (selectedCol>=int(scrollColStart)) i=selectedCol-scrollColStart+1;
-                  double x=colLeftMargin[i];
-                  cairo_set_source_rgba(cairo,1,1,1,1);
-                  cairo_rectangle(cairo,x,y,colLeftMargin[i+1]-x,rowHeight);
-                  cairo_fill(cairo);
-                  pango.setMarkup(defang(godleyIcon->table.cell(selectedRow,selectedCol)));
-                  cairo_set_source_rgba(cairo,0,0,0,1);
-                  cairo_move_to(cairo,x,y);
+                  const double xx=colLeftMargin[i], yy=j*rowHeight+topTableOffset;
+                  {
+                    const cairo::CairoSave cs(cairo);
+                    cairo_set_source_rgba(cairo,1,1,1,1);
+                    cairo_rectangle(cairo,xx,yy,colLeftMargin[i+1]-xx,rowHeight);
+                    cairo_fill_preserve(cairo);
+                    cairo_set_source_rgba(cairo,1,.55,0,1);
+                    cairo_set_line_width(cairo,2);
+                    cairo_stroke(cairo);
+                  }
+                  pango.setMarkup(defang(m_godleyIcon.table.cell(selectedRow,selectedCol)));
+                  cairo_move_to(cairo,xx,yy);
                   pango.show();
 				  
                   // show insertion cursor
-                  cairo_move_to(cairo,x+pango.idxToPos(insertIdx),y);
+                  cairo_move_to(cairo,xx+pango.idxToPos(insertIdx),yy);
                   cairo_rel_line_to(cairo,0,rowHeight);
                   cairo_set_line_width(cairo,1);
                   cairo_stroke(cairo);
@@ -407,7 +423,7 @@ namespace minsky
                   if (selectIdx!=insertIdx)
                     {
                       // indicate some text has been selected
-                      cairo_rectangle(cairo,x+pango.idxToPos(insertIdx),y,
+                      cairo_rectangle(cairo,xx+pango.idxToPos(insertIdx),yy,
                                       pango.idxToPos(selectIdx)-pango.idxToPos(insertIdx),rowHeight);
                       cairo_set_source_rgba(cairo,0.5,0.5,0.5,0.5);
                       cairo_fill(cairo);
@@ -417,14 +433,19 @@ namespace minsky
         }
     }
   }
+  
+  double GodleyTableEditor::height() const
+  {
+    return godleyIcon().table.rows()*rowHeight;
+  }
 
   int GodleyTableEditor::colX(double x) const
   {
-    if (x<colLeftMargin[0]) return -1;
+    if (colLeftMargin.size()<2 || x<colLeftMargin[0]) return -1;
     if (x<colLeftMargin[1]) return 0;
     auto p=std::upper_bound(colLeftMargin.begin(), colLeftMargin.end(), x);
     size_t r=p-colLeftMargin.begin()-2+scrollColStart;
-    if (r>godleyIcon->table.cols()-1) r=-1; // out of bounds, invalidate. Also exclude A-L-E column. For ticket 1163.
+    if (r>m_godleyIcon.table.cols()-1) r=-1; // out of bounds, invalidate. Also exclude A-L-E column. For ticket 1163.
     return r;
   }
 
@@ -432,18 +453,18 @@ namespace minsky
   {
     int c=(y-topTableOffset)/rowHeight;
     if (c>0) c+=scrollRowStart-1;
-    if (c<0 || size_t(c)>godleyIcon->table.rows()) c=-1; // out of bounds, invalidate
+    if (c<0 || size_t(c)>m_godleyIcon.table.rows()) c=-1; // out of bounds, invalidate
     return c;
   }
 
   int GodleyTableEditor::textIdx(double x) const
   {
-    cairo::Surface surf(cairo_recording_surface_create(CAIRO_CONTENT_COLOR,NULL));
+    const cairo::Surface surf(cairo_recording_surface_create(CAIRO_CONTENT_COLOR,NULL));
     Pango pango(surf.cairo());
     if (selectedCellInTable() && (selectedRow!=1 || selectedCol!=0)) // No text index needed for a cell that is immutable. For ticket 1064
       {
 		// Make sure non-utf8 chars converted to utf8 as far as possible. for ticket 1166.  
-        auto& str=godleyIcon->table.cell(selectedRow,selectedCol);
+        auto& str=m_godleyIcon.table.cell(selectedRow,selectedCol);
         str=utf_to_utf<char>(str);     
         pango.setMarkup(defang(str));
         int j=0;
@@ -462,13 +483,18 @@ namespace minsky
 
   void GodleyTableEditor::mouseDown(double x, double y)
   {
+    // catch exception, as the intention here is to allow the user to fix a problem
+    try {update();}
+    catch (...) {}
+    button1=true;
     x/=zoomFactor;
     y/=zoomFactor;
+    requestRedrawCanvas();
     switch (clickType(x,y))
       {
       case rowWidget:
         {
-          unsigned r=rowY(y);
+          const unsigned r=rowY(y);
           if (r<rowWidgets.size())
             {
               rowWidgets[r].invoke(x);
@@ -479,8 +505,8 @@ namespace minsky
         }
       case colWidget:
         {
-          unsigned c=colX(x);
-          unsigned visibleCol=c-scrollColStart+1;
+          const unsigned c=colX(x);
+          const unsigned visibleCol=c-scrollColStart+1;
           if (c<colWidgets.size() && visibleCol < colLeftMargin.size())
             {
               colWidgets[c].invoke(x-colLeftMargin[visibleCol]);
@@ -489,18 +515,26 @@ namespace minsky
             }
           return;
         }
+      case background:
+        selectIdx=insertIdx=0;
+        selectedCol=selectedRow=-1;
+        break;
+      case importStock:
+        break;
       default:
-        // catch exception, as the intention here is to allow the user to fix a problem
-        try {update();}
-        catch (...) {}
+        if (selectedRow>=0 && selectedCol>=0)
+          { // if cell already selected, deselect to allow the chance to redraw
+            selectedCol=selectedRow=-1;
+            break;
+          }
         selectedCol=colX(x);
         selectedRow=rowY(y);
         if (selectedCellInTable() && (selectedRow!=1 || selectedCol!=0)) // Cannot save text in cell(1,0). For ticket 1064
            {
              // Make sure non-utf8 chars converted to utf8 as far as possible. for ticket 1166.
-             auto& str=godleyIcon->table.cell(selectedRow,selectedCol);
+             auto& str=m_godleyIcon.table.cell(selectedRow,selectedCol);
              str=utf_to_utf<char>(str);	 
-             godleyIcon->table.savedText=str;
+             m_godleyIcon.table.savedText=str;
              selectIdx=insertIdx = textIdx(x);
            }
         else
@@ -511,34 +545,36 @@ namespace minsky
 
   void GodleyTableEditor::mouseUp(double x, double y)
   {
+    button1=false;
     x/=zoomFactor;
     y/=zoomFactor;
-    int c=colX(x), r=rowY(y);
+    const int c=colX(x), r=rowY(y);
     motionRow=motionCol=-1;
     // Cannot swap cell(1,0) with another. For ticket 1064. Also cannot move cells outside an existing Godley table to create new rows or columns. For ticket 1066. 
-    if ((selectedCol==0 && selectedRow==1) || (c==0 && r==1) || size_t(selectedRow)>=(godleyIcon->table.rows()) || size_t(r)>=(godleyIcon->table.rows()) || size_t(c)>=(godleyIcon->table.cols()) || size_t(selectedCol)>=(godleyIcon->table.cols()))
+    if ((selectedCol==0 && selectedRow==1) || (c==0 && r==1) || size_t(selectedRow)>=(m_godleyIcon.table.rows()) || size_t(r)>=(m_godleyIcon.table.rows()) || size_t(c)>=(m_godleyIcon.table.cols()) || size_t(selectedCol)>=(m_godleyIcon.table.cols()))
       return;  
     if (selectedRow==0)
       {  
-		// Disallow moving flow labels column and prevent columns from moving when import stockvar dropdown button is pressed in empty column. For tickets 1053/1064/1066
-        if (c>0 && size_t(c)<godleyIcon->table.cols() && selectedCol>0 && size_t(selectedCol)<godleyIcon->table.cols() && c!=selectedCol && !(colLeftMargin[c+1]-x < pulldownHot)) 
-          godleyIcon->table.moveCol(selectedCol,c-selectedCol);
+        // Disallow moving flow labels column and prevent columns from moving when import stockvar dropdown button is pressed in empty column. For tickets 1053/1064/1066
+        if (c>0 && size_t(c)<m_godleyIcon.table.cols() && selectedCol>0 && size_t(selectedCol)<m_godleyIcon.table.cols() && c!=selectedCol && !(colLeftMargin[c+1]-x < pulldownHot)) 
+          m_godleyIcon.table.moveCol(selectedCol,c-selectedCol);
       }
     else if (r>0 && selectedCol==0)
       {
-        if (r!=selectedRow && !godleyIcon->table.initialConditionRow(selectedRow) && !godleyIcon->table.initialConditionRow(r))  // Cannot move Intitial Conditions row. For ticket 1064.
-          godleyIcon->table.moveRow(selectedRow,r-selectedRow);
+        if (r!=selectedRow && !m_godleyIcon.table.initialConditionRow(selectedRow) && !m_godleyIcon.table.initialConditionRow(r))  // Cannot move Intitial Conditions row. For ticket 1064.
+          m_godleyIcon.table.moveRow(selectedRow,r-selectedRow);
       } 
     else if ((c!=selectedCol || r!=selectedRow) && c>0 && r>0)
       {
-        swap(godleyIcon->table.cell(selectedRow,selectedCol), godleyIcon->table.cell(r,c));
-        minsky().balanceDuplicateColumns(*godleyIcon,selectedCol);
-        minsky().balanceDuplicateColumns(*godleyIcon,c);
-        selectedCol=-1;//c;
-        selectedRow=-1;//r;
+        swap(m_godleyIcon.table.cell(selectedRow,selectedCol), m_godleyIcon.table.cell(r,c));
+        minsky().balanceDuplicateColumns(m_godleyIcon,selectedCol);
+        minsky().balanceDuplicateColumns(m_godleyIcon,c);
+        selectedCol=-1;
+        selectedRow=-1;
       }
     else if (selectIdx!=insertIdx)
       copy();
+    requestRedrawCanvas();
   }
 
   void GodleyTableEditor::mouseMoveB1(double x, double y)
@@ -548,10 +584,16 @@ namespace minsky
     motionCol=colX(x), motionRow=rowY(y);
     if (motionCol==selectedCol && motionRow==selectedRow)
       selectIdx=textIdx(x);
+    requestRedrawCanvas();
   }
 
   void GodleyTableEditor::mouseMove(double x, double y)
   {
+    if (button1)
+      {
+        mouseMoveB1(x,y);
+        return;
+      }
     x/=zoomFactor;
     y/=zoomFactor;
     // clear any existing marks
@@ -562,23 +604,27 @@ namespace minsky
       {
       case rowWidget:
         {
-          unsigned r=rowY(y);
+          const unsigned r=rowY(y);
           if (r<rowWidgets.size())
             rowWidgets[r].hover(x);
+          requestRedrawCanvas();
           break;
         }
       case colWidget:
         {
-          unsigned c=colX(x);
+          const unsigned c=colX(x);
           if (c<colWidgets.size())
             colWidgets[c].hover(x-colLeftMargin[c]);
+          requestRedrawCanvas();
           break;
         }
       case background:
         break;
       default:
         hoverRow=rowY(y);
+        if (hoverRow>0) hoverRow-=scrollRowStart-1;
         hoverCol=colX(x);
+        if (hoverCol>0) hoverCol-=scrollColStart-1;
         break;
       }
   }
@@ -588,7 +634,7 @@ namespace minsky
   void GodleyTableEditor::keyPress(int keySym, const std::string& utf8)
   {
     
-    auto& table=godleyIcon->table;
+    auto& table=m_godleyIcon.table;
     if (selectedCellInTable() && (selectedCol!=0 || selectedRow!=1)) // Cell (1,0) is off-limits. For ticket 1064
           {			  	  
 			auto& str=table.cell(selectedRow,selectedCol);
@@ -688,13 +734,14 @@ namespace minsky
             return; // early return, no need to redraw
           }
       }
+    requestRedrawCanvas();
   }
 
   void GodleyTableEditor::delSelection()
   {
     if (selectedCellInTable() && insertIdx!=selectIdx)
       {
-        auto& str=godleyIcon->table.cell(selectedRow,selectedCol);
+        auto& str=m_godleyIcon.table.cell(selectedRow,selectedCol);
         str.erase(min(insertIdx,selectIdx),abs(int(insertIdx)-int(selectIdx))); 
         selectIdx=insertIdx=min(insertIdx,selectIdx);   
       }
@@ -703,7 +750,7 @@ namespace minsky
     void GodleyTableEditor::handleBackspace()
     {
       if (!selectedCellInTable()) return;
-      auto& table=godleyIcon->table;
+      auto& table=m_godleyIcon.table;
       auto& str=table.cell(selectedRow,selectedCol);
       if (insertIdx!=selectIdx)
         delSelection();
@@ -718,11 +765,11 @@ namespace minsky
     void GodleyTableEditor::handleDelete()
     {
       if (!selectedCellInTable()) return;
-      auto& table=godleyIcon->table;
+      auto& table=m_godleyIcon.table;
       auto& str=table.cell(selectedRow,selectedCol); 
       if (insertIdx!=selectIdx)
         delSelection();
-      else if (insertIdx>=0 && insertIdx<str.length())
+      else if (insertIdx<str.length())
         str.erase(insertIdx,numBytes(str[insertIdx]));
       selectIdx=insertIdx;
     }
@@ -733,44 +780,47 @@ namespace minsky
     copy();
     if (selectIdx==insertIdx)
       // delete entire cell
-      godleyIcon->table.cell(selectedRow,selectedCol).clear();
+      m_godleyIcon.table.cell(selectedRow,selectedCol).clear();
     else
       delSelection();
+    requestRedrawCanvas();
   }
   
   void GodleyTableEditor::copy()
   {
     if (!selectedCellInTable()) return;
-    auto& str=godleyIcon->table.cell(selectedRow,selectedCol);
+    auto& str=m_godleyIcon.table.cell(selectedRow,selectedCol);
     if (selectIdx!=insertIdx)
-      cminsky().putClipboard
+      cminsky().clipboard.putClipboard
         (str.substr(min(selectIdx,insertIdx), abs(int(selectIdx)-int(insertIdx))));
     else
-      cminsky().putClipboard(str);  
+      cminsky().clipboard.putClipboard(str);  
   }
 
   void GodleyTableEditor::paste()
   {
     if (!selectedCellInTable()) return;
     delSelection();
-    auto& str=godleyIcon->table.cell(selectedRow,selectedCol); 
-    auto stringToInsert=cminsky().getClipboard();
+    auto& str=m_godleyIcon.table.cell(selectedRow,selectedCol); 
+    auto stringToInsert=cminsky().clipboard.getClipboard();
     // only insert first line
     auto p=stringToInsert.find('\n');
     if (p!=string::npos)
       stringToInsert=stringToInsert.substr(0,p-1);
     str.insert(insertIdx,stringToInsert);
     selectIdx=insertIdx+=stringToInsert.length();
+    requestRedrawCanvas();
   }
 
   GodleyTableEditor::ClickType GodleyTableEditor::clickType(double x, double y) const
   {
-    int c=colX(x), r=rowY(y);
+    const int c=colX(x), r=rowY(y);
+
     if (x<leftTableOffset && r>0)
       return rowWidget;
     if (y<topTableOffset && y>columnButtonsOffset && c>0)
       return colWidget;
-  
+
     if (r==0)
       {
         if (colLeftMargin[c+1]-x < pulldownHot)
@@ -780,52 +830,87 @@ namespace minsky
     if (c==0)
       return col0;
 
-    if (c>0 && c<int(godleyIcon->table.cols()))
-      if (r>0 && r<int(godleyIcon->table.rows()))
+    if (c>0 && c<int(m_godleyIcon.table.cols()))
+      if (r>0 && r<int(m_godleyIcon.table.rows()))
         return internal;
 
     return background;
   }
 
+  std::set<string> GodleyTableEditor::matchingTableColumns(double x)
+  {
+    const int col=colXZoomed(x);
+    return matchingTableColumnsByCol(col);
+  }
+
+  std::set<string> GodleyTableEditor::matchingTableColumnsByCol(int col)
+  {
+    if (col<0||col>=static_cast<int>(godleyIcon().table.cols())) return {};
+    return minsky().matchingTableColumns(godleyIcon(), godleyIcon().table.assetClass(col));
+  }
+
   void GodleyTableEditor::addStockVar(double x)
   {
-    int c=colX(x);
-    if (c>0)
-      godleyIcon->table.insertCol(c+1);
+    const int c=colXZoomed(x);
+    addStockVarByCol(c);
   }
+
+  void GodleyTableEditor::addStockVarByCol(int c)
+  {
+    if (c>0) m_godleyIcon.table.insertCol(c+1);
+  }
+
   void GodleyTableEditor::importStockVar(const string& name, double x)
   {
-    x/=zoomFactor;
-    int c=colX(x);
-    if (c>0 && size_t(c)<godleyIcon->table.cols())
+    const int c=colXZoomed(x);
+    importStockVarByCol(name, c);
+  }
+
+  void GodleyTableEditor::importStockVarByCol(const string& name, int c)
+  {
+    if (c>0 && size_t(c)<m_godleyIcon.table.cols())
       {
-        godleyIcon->table.cell(0,c)=name;
-        minsky().importDuplicateColumn(godleyIcon->table, c);
+        m_godleyIcon.table.cell(0,c)=name;
+        minsky().importDuplicateColumn(m_godleyIcon.table, c);
+        adjustWidgets();
+        update(); //TODO I don't know why this is insufficient to update icon on canvas
       }
   }
 
   void GodleyTableEditor::deleteStockVar(double x)
   {
-    x/=zoomFactor;
-    int c=colX(x);
+    const int c=colXZoomed(x);
+    deleteStockVarByCol(c);
+  }
+
+  void GodleyTableEditor::deleteStockVarByCol(int c)
+  {
     if (c>=0)
-      godleyIcon->table.deleteCol(c+1);
+      m_godleyIcon.table.deleteCol(c+1);
   }
 
   void GodleyTableEditor::addFlow(double y)  
   {
-    y/=zoomFactor;
-    int r=rowY(y);
+    const int r=rowYZoomed(y);
+    addFlowByRow(r);
+  }
+
+  void GodleyTableEditor::addFlowByRow(int r)  
+  {
     if (r>0)                                 
-      godleyIcon->table.insertRow(r+1);
+      m_godleyIcon.table.insertRow(r+1);
   }
 
   void GodleyTableEditor::deleteFlow(double y)
   {
-    y/=zoomFactor;
-    int r=rowY(y);
+    const int r=rowYZoomed(y);
+    deleteFlowByRow(r);
+  }
+
+  void GodleyTableEditor::deleteFlowByRow(int r)
+  {
     if (r>1)                                       // Cannot delete flow in Initial Conditions row. For ticket 1064
-      godleyIcon->deleteRow(r+1);
+      m_godleyIcon.deleteRow(r+1);
   }
   
 namespace {
@@ -840,17 +925,17 @@ namespace {
   {
     x/=zoomFactor;
     y/=zoomFactor;
-    unsigned c=colX(x);
+    const unsigned c=colX(x);
     string tmpStr;
-    if (c>=godleyIcon->table.cols()) return tmpStr;
+    if (c>=m_godleyIcon.table.cols()) return tmpStr;
     if (clickType(x,y)==colWidget) {
-      unsigned visibleCol=c-scrollColStart+1;
+      const unsigned visibleCol=c-scrollColStart+1;
       if (c<colWidgets.size() && visibleCol < colLeftMargin.size())
         {
-          auto moveVar=godleyIcon->table.cell(0,c);		
-          auto oldAssetClass=godleyIcon->table._assetClass(c);
-          auto targetAssetClassPlus=godleyIcon->table._assetClass(c+1);
-          auto targetAssetClassMinus=godleyIcon->table._assetClass(c-1);
+          auto moveVar=m_godleyIcon.table.cell(0,c);		
+          auto oldAssetClass=m_godleyIcon.table.assetClass(c);
+          auto targetAssetClassPlus=m_godleyIcon.table.assetClass(c+1);
+          auto targetAssetClassMinus=m_godleyIcon.table.assetClass(c-1);
           if (colWidgets[c].button(x-colLeftMargin[visibleCol])==3 && oldAssetClass!=GodleyAssetClass::equity) {
             if (targetAssetClassPlus!=oldAssetClass && !moveVar.empty() && targetAssetClassPlus!=GodleyAssetClass::equity && targetAssetClassPlus!=GodleyAssetClass::noAssetClass)
               tmpStr=constructMessage(targetAssetClassPlus,oldAssetClass,moveVar);
@@ -875,15 +960,15 @@ namespace {
   string GodleyTableEditor::swapAssetClass(double x, double) 
   {  
     x/=zoomFactor;
-    int c=colX(x);	
+    const int c=colX(x);	
     string tmpStr;	  
-    if (selectedRow==0 && size_t(selectedCol)<godleyIcon->table.cols())
+    if (selectedRow==0 && size_t(selectedCol)<m_godleyIcon.table.cols())
       {
         // clickType triggers pango error which causes this condition to be skipped and thus column gets moved to Equity, which should not be the case   	
         if (c>0 && selectedCol>0 && c!=selectedCol) {
-          auto swapVar=godleyIcon->table.cell(0,selectedCol);
-          auto oldAssetClass=godleyIcon->table._assetClass(selectedCol);
-          auto targetAssetClass=godleyIcon->table._assetClass(c);
+          auto swapVar=m_godleyIcon.table.cell(0,selectedCol);
+          auto oldAssetClass=m_godleyIcon.table.assetClass(selectedCol);
+          auto targetAssetClass=m_godleyIcon.table.assetClass(c);
           if (!swapVar.empty() && !(colLeftMargin[c+1]-x < pulldownHot)) { // ImportVar dropdown button should not trigger this condition. For ticket 1162
             if (targetAssetClass!=oldAssetClass && targetAssetClass!=GodleyAssetClass::equity && targetAssetClass!=GodleyAssetClass::noAssetClass)
               tmpStr=constructMessage(targetAssetClass,oldAssetClass,swapVar);
@@ -898,9 +983,9 @@ namespace {
   void GodleyTableEditor::highlightColumn(cairo_t* cairo, unsigned col)
   {
     if (col<scrollColStart) return;
-    double x=colLeftMargin[col-scrollColStart+1];
-    double width=colLeftMargin[col-scrollColStart+2]-x;
-    double tableHeight=(godleyIcon->table.rows()-scrollRowStart+1)*rowHeight;
+    const double x=colLeftMargin[col-scrollColStart+1];
+    const double width=colLeftMargin[col-scrollColStart+2]-x;
+    const double tableHeight=(m_godleyIcon.table.rows()-scrollRowStart+1)*rowHeight;
     cairo_rectangle(cairo,x,topTableOffset,width,tableHeight);
     cairo_set_source_rgba(cairo,1,1,1,0.5);
     cairo_fill(cairo);
@@ -909,7 +994,7 @@ namespace {
   void GodleyTableEditor::highlightRow(cairo_t* cairo, unsigned row)
   {
     if (row<scrollRowStart) return;
-    double y=(row-scrollRowStart+1)*rowHeight+topTableOffset;
+    const double y=(row-scrollRowStart+1)*rowHeight+topTableOffset;
     cairo_rectangle(cairo,leftTableOffset,y,colLeftMargin.back()-leftTableOffset,rowHeight);
     cairo_set_source_rgba(cairo,1,1,1,0.5);
     cairo_fill(cairo);
@@ -918,9 +1003,9 @@ namespace {
   void GodleyTableEditor::highlightCell(cairo_t* cairo, unsigned row, unsigned col)
   {
     if (row<scrollRowStart || col<scrollColStart) return;
-    double x=colLeftMargin[col-scrollColStart+1];
-    double width=colLeftMargin[col-scrollColStart+2]-x;
-    double y=(row-scrollRowStart+1)*rowHeight+topTableOffset;
+    const double x=colLeftMargin[col-scrollColStart+1];
+    const double width=colLeftMargin[col-scrollColStart+2]-x;
+    const double y=(row-scrollRowStart+1)*rowHeight+topTableOffset;
     cairo_rectangle(cairo,x,y,width,rowHeight);
     cairo_set_source_rgba(cairo,1,1,1,0.5);
     cairo_fill(cairo);
@@ -930,8 +1015,8 @@ namespace {
   {
     while (history.size()>maxHistory) history.pop_front();
     // Perform deep comparison of Godley tables in history to avoid spurious noAssetClass columns from arising during undo. For ticket 1118.
-    if (history.empty() || !(history.back()==godleyIcon->table)) {
-      history.push_back(godleyIcon->table);
+    if (history.empty() || !(history.back()==m_godleyIcon.table)) {
+      history.push_back(m_godleyIcon.table);
     }
     historyPtr=history.size();
   }
@@ -946,19 +1031,18 @@ namespace {
         auto& d=history[historyPtr-1];
         // Perform deep comparison of Godley tables in history to avoid spurious noAssetClass columns from arising during undo. For ticket 1118.
         if (d.getData().empty()) return; // should not happen
-		godleyIcon->table=d; 
+		m_godleyIcon.table=d; 
       }
   }
 
   void GodleyTableEditor::adjustWidgets()
   {
-    assert(godleyIcon);
     rowWidgets.clear();
-    for (size_t i=0; i<godleyIcon->table.rows(); ++i)
-      rowWidgets.emplace_back(*godleyIcon, i);
+    for (size_t i=0; i<m_godleyIcon.table.rows(); ++i)
+      rowWidgets.emplace_back(m_godleyIcon, i);
     colWidgets.clear();
-    for (size_t i=0; i<godleyIcon->table.cols(); ++i)
-      colWidgets.emplace_back(*godleyIcon, i);
+    for (size_t i=0; i<m_godleyIcon.table.cols(); ++i)
+      colWidgets.emplace_back(m_godleyIcon, i);
     // nb first column/row is actually 1 - 0th element actually
     // just ignored
     if (rowWidgets.size()==2)
@@ -985,33 +1069,33 @@ namespace {
 
   void GodleyTableEditor::update()
   {
-    if (selectedCol>0 && selectedCol<int(godleyIcon->table.cols()))
+    if (selectedCol>0 && selectedCol<int(m_godleyIcon.table.cols()))
       {
         if (selectedRow==0)
           {
             // rename all instances of the stock variable if updated. For ticket #956
             // find stock variable if it exists
-            for (const auto& sv: godleyIcon->stockVars())
-              if (sv->valueId()==godleyIcon->valueId(godleyIcon->table.savedText))
+            for (const auto& sv: m_godleyIcon.stockVars())
+              if (sv->valueId()==m_godleyIcon.valueId(m_godleyIcon.table.savedText))
                 {
                   auto savedItem=minsky().canvas.item;
                   minsky().canvas.item=sv;
-                  auto newName=utf_to_utf<char>(godleyIcon->table.cell(selectedRow,selectedCol));
+                  auto newName=utf_to_utf<char>(m_godleyIcon.table.cell(selectedRow,selectedCol));
                   if (!newName.empty())
                     minsky().canvas.renameAllInstances(newName);
                   savedItem.swap(minsky().canvas.item);
                 }
-            minsky().importDuplicateColumn(godleyIcon->table, selectedCol);
+            minsky().importDuplicateColumn(m_godleyIcon.table, selectedCol);
           }
         else
           {
-            if (godleyIcon->table.initialConditionRow(selectedRow))
+            if (m_godleyIcon.table.initialConditionRow(selectedRow))
               {
                 // if the contents of the cell are cleared, set the cell to "0". For #1181
-                if (!godleyIcon->table.savedText.empty() && godleyIcon->table.cell(selectedRow,selectedCol).empty())
-                  godleyIcon->table.cell(selectedRow,selectedCol)="0";
+                if (!m_godleyIcon.table.savedText.empty() && m_godleyIcon.table.cell(selectedRow,selectedCol).empty())
+                  m_godleyIcon.table.cell(selectedRow,selectedCol)="0";
               }
-            minsky().balanceDuplicateColumns(*godleyIcon,selectedCol);
+            minsky().balanceDuplicateColumns(m_godleyIcon,selectedCol);
           }
         // get list of GodleyIcons first, rather than doing recursiveDo, as update munges the items vectors
         auto godleyTables=minsky().model->findItems
@@ -1038,9 +1122,10 @@ namespace {
     {
       if (selectedCol>=0)
         {
+          update();
           selectedCol++;
           insertIdx=0;
-          if (selectedCol>=int(godleyIcon->table.cols()))
+          if (selectedCol>=int(m_godleyIcon.table.cols()))
             {
               if (selectedRow>0) selectedCol=0;   // Minor fix: Make sure tabbing and right arrow traverse all editable cells.
               else selectedCol=1;
@@ -1054,28 +1139,32 @@ namespace {
     {
       if (selectedCol>=0)
         {
+          update();
           selectedCol--;
-          insertIdx=0;
           if (selectedCol<0)
             {
-              selectedCol=godleyIcon->table.cols()-1;
+              selectedCol=m_godleyIcon.table.cols()-1;
               navigateUp();
             }
           checkCell00();
+          insertIdx=godleyIcon().table.cellInTable(selectedRow, selectedCol)?
+            godleyIcon().table.cell(selectedRow, selectedCol).length(): 0;
         }
     }
 
     void GodleyTableEditor::navigateUp()
     {
+      update();
       if (selectedRow>=0)
-        selectedRow=(selectedRow-1)%godleyIcon->table.rows();
+        selectedRow=(selectedRow-1)%m_godleyIcon.table.rows();
       checkCell00();
     }
   
     void GodleyTableEditor::navigateDown()
     {
+      update();
       if (selectedRow>=0)
-        selectedRow=(selectedRow+1)%godleyIcon->table.rows();
+        selectedRow=(selectedRow+1)%m_godleyIcon.table.rows();
       checkCell00();
     }
 
@@ -1086,7 +1175,7 @@ namespace {
     double x0, y0;
     cairo_get_current_point(cairo,&x0, &y0);
     
-    CairoSave cs(cairo);
+    const CairoSave cs(cairo);
     Pango pango(cairo);
     // increase text size a bit for the buttons
     pango.setFontSize(0.8*buttonSpacing);
@@ -1108,9 +1197,9 @@ namespace {
   template <ButtonWidgetEnums::RowCol rowCol>
   void ButtonWidget<rowCol>::draw(cairo_t* cairo)
   {	    
-    CairoSave cs(cairo);
+    const CairoSave cs(cairo);
     int idx=0;
-    if (rowCol==row || (!cminsky().multipleEquities && godleyIcon.table.singleEquity())) {  // no column widgets on equity column in single equity column mode
+    if (rowCol==row || (!cminsky().multipleEquities() && godleyIcon.table.singleEquity())) {  // no column widgets on equity column in single equity column mode
       if (rowCol == row || (rowCol == col && pos!=last)) 
         drawButton(cairo,"+",0,1,0,idx++);
       if ((rowCol == row && pos!=first && pos!=firstAndLast) || (rowCol == col && pos!=last)) 	// no delete button for first row containing initial conditions. For ticket 1064
@@ -1131,6 +1220,21 @@ namespace {
     
   }  
  
+  template <ButtonWidgetEnums::RowCol rowCol>
+  void ButtonWidget<rowCol>::draw(const ICairoShim& cairoShim)
+  {
+    auto& shimImpl = dynamic_cast<const CairoShimCairo&>(cairoShim);
+    draw(shimImpl._internalGetCairoContext());
+  }
+
+  void GodleyTableEditor::draw(const ICairoShim& cairoShim)
+  {
+    auto& shimImpl = dynamic_cast<const CairoShimCairo&>(cairoShim);
+    draw(shimImpl._internalGetCairoContext());
+  }
+
   template class ButtonWidget<ButtonWidgetEnums::row>;
   template class ButtonWidget<ButtonWidgetEnums::col>;
 }
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::GodleyTableWindow);
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::GodleyTableEditor);

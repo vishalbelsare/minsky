@@ -17,29 +17,26 @@
   along with Minsky.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "minsky.h"
 #include "rungeKutta.h"
 #include "variableValue.h"
 #include "error.h"
 #include "matrix.h"
-#include "minsky.h"
+#include "rungeKutta.rcd"
+#include "rungeKutta.xcd"
+#include "simulation.rcd"
 #include "minsky_epilogue.h"
 
 #include <gsl/gsl_errno.h>
 #include <gsl/gsl_odeiv2.h>
 #include <vector>
 
-//#include <thread>
-// std::thread apparently not supported on MXE for now...
-#include <boost/thread.hpp>
+#include <thread>
 
 using namespace std;
 
 namespace minsky
 {
-  /// checks if any GUI events are waiting, and proces an event if so
-  /// TODO - make this a virtual method of RungeKutta?
-  //  void doOneEvent(bool idleTasksOnly);
-
   /*
     For using GSL Runge-Kutta routines
   */
@@ -116,7 +113,7 @@ namespace minsky
     ~RKdata() {gsl_odeiv2_driver_free(driver);}
   };
 
-  void RungeKutta::reset()
+  void RungeKutta::rkreset()
   {
     if (order==1 && !implicit)
       ode.reset(); // do explicit Euler
@@ -124,18 +121,19 @@ namespace minsky
       ode.reset(new RKdata(this)); // set up GSL ODE routines
   }
 
-  void RungeKutta::step()
+  void RungeKutta::rkstep()
   {
     if (nSteps<1) return;
+    running=true; // this ensure reset flag is cleared
     resetIfFlagged();
     running=true;
     
     // create a private copy for worker thread use
-    vector<double> stockVarsCopy(stockVars);
+    auto stockVarsCopy(stockVars);
     RKThreadRunning=true;
     int err=GSL_SUCCESS;
     // run RK algorithm on a separate worker thread so as to not block UI. See ticket #6
-    boost::thread rkThread([&]() {
+    thread rkThread([&]() {
       try
         { 
           double tp=reverse? -t: t;
@@ -145,14 +143,14 @@ namespace minsky
               // we need to update Minsky's t synchronously to support the t operator
               // potentially means t and stockVars out of sync on GUI, but should still be thread safe
               err=gsl_odeiv2_driver_apply(ode->driver, &tp, numeric_limits<double>::max(), 
-                                          &stockVarsCopy[0]);
+                                          stockVarsCopy.data());
             }
           else // do explicit Euler method
             {
               vector<double> d(stockVarsCopy.size());
               for (int i=0; i<nSteps; ++i, tp+=stepMax)
                 {
-                  evalEquations(&d[0], tp, &stockVarsCopy[0]);
+                  evalEquations(d.data(), tp, stockVarsCopy.data());
                   for (size_t j=0; j<d.size(); ++j)
                     stockVarsCopy[j]+=d[j];
                 }
@@ -212,12 +210,12 @@ namespace minsky
   void RungeKutta::evalJacobian(Matrix& jac, double t, const double sv[])
   {
     EvalOpBase::t=reverse? -t: t;
-    double reverseFactor=reverse? -1: 1;
+    const double reverseFactor=reverse? -1: 1;
     // firstly evaluate the flow variables. Initialise to flowVars so
     // that no input vars are correctly initialised
-    vector<double> flow=flowVars;
+    auto flow=flowVars;
     for (size_t i=0; i<equations.size(); ++i)
-      equations[i]->eval(&flow[0], flow.size(), sv);
+      equations[i]->eval(flow.data(), flow.size(), sv);
 
     // then determine the derivatives with respect to variable j
     for (size_t j=0; j<stockVars.size(); ++j)
@@ -225,9 +223,9 @@ namespace minsky
         vector<double> ds(stockVars.size()), df(flowVars.size());
         ds[j]=1;
         for (size_t i=0; i<equations.size(); ++i)
-          equations[i]->deriv(&df[0], df.size(), &ds[0], sv, &flow[0]);
+          equations[i]->deriv(df.data(), df.size(), ds.data(), sv, flow.data());
         vector<double> d(stockVars.size());
-        evalGodley.eval(&d[0], &df[0]);
+        evalGodley.eval(d.data(), df.data());
         for (vector<Integral>::iterator i=integrals.begin(); 
              i!=integrals.end(); ++i)
           {
@@ -244,16 +242,41 @@ namespace minsky
   void RungeKutta::evalEquations(double result[], double t, const double vars[])
   {
     EvalOpBase::t=reverse? -t: t;
-    double reverseFactor=reverse? -1: 1;
+    const double reverseFactor=reverse? -1: 1;
     // firstly evaluate the flow variables. Initialise to flowVars so
     // that no input vars are correctly initialised
-    vector<double> flow(flowVars);
+    auto flow(flowVars);
+
     for (size_t i=0; i<equations.size(); ++i)
-      equations[i]->eval(&flow[0], flow.size(), vars);
+      equations[i]->eval(flow.data(), flow.size(), vars);
+    // TODO - equations are ordered, so we can't naively parallelise this loop.
+//    auto eqSize=equations.size();
+//    string threadErrMsg;
+//#ifdef _OPENMP
+//    //#pragma omp parallel for if(eqSize>20)
+//#endif
+//    for (size_t i=0; i<eqSize; ++i)
+//      try
+//        {
+//          equations[i]->eval(flow.data(), flow.size(), vars);
+//        }
+//      catch (const std::exception& e)
+//        {
+//#ifdef _OPENMP
+//#pragma omp critical
+//#endif
+//          threadErrMsg=e.what();
+//        }
+//    if (!threadErrMsg.empty())
+//      throw runtime_error(threadErrMsg);
 
     // then create the result using the Godley table
-    for (size_t i=0; i<stockVars.size(); ++i) result[i]=0;
-    evalGodley.eval(result, &flow[0]);
+    auto stvSize=stockVars.size();
+#ifdef _OPENMP
+#pragma omp parallel for if(stvSize>20)
+#endif
+    for (size_t i=0; i<stvSize; ++i) result[i]=0;
+    evalGodley.eval(result, flow.data());
 
     // integrations are kind of a copy
     for (vector<Integral>::iterator i=integrals.begin(); i<integrals.end(); ++i)
@@ -266,6 +289,10 @@ namespace minsky
           }
         // enable element-wise integration of tensor variables. for feature 147
         assert(i->input().size()==i->stock->size());
+        auto inputSize=i->input().size();
+#ifdef _OPENMP
+#pragma omp parallel for if(inputSize>20)
+#endif
 	for (size_t j=0; j<i->input().size(); ++j)
           result[i->stock->idx()+j] = reverseFactor *
             (i->input().isFlowVar()? flow[i->input().idx()+j] : vars[i->input().idx()+j]);
@@ -274,3 +301,4 @@ namespace minsky
 
 
 }
+CLASSDESC_ACCESS_EXPLICIT_INSTANTIATION(minsky::RungeKutta);
